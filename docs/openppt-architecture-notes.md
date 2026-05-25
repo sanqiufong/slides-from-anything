@@ -2,13 +2,13 @@
 
 ## Product Direction
 
-OpenPPT is a specialized visual agent for building PPT / Web-PPT decks. Open Design provides the product shell, local daemon, project persistence, agent run pipeline, SSE streaming, and file workspace. Open Slide provides the canonical deck authoring contract and editing workbench model. Design Vault provides reusable visual templates and design-language evidence.
+OpenPPT is a specialized visual agent for building PPT / Web-PPT decks. Slides from Anything provides the product shell, local daemon, project persistence, agent run pipeline, SSE streaming, and file workspace. Open Slide provides the canonical deck authoring contract and editing workbench model. Design Vault provides reusable visual templates and design-language evidence.
 
 The canonical source is Web-PPT: `slides/<slideId>/index.tsx`. PPTX is a derived export path, not an editable source of truth.
 
 ## Source Projects
 
-### Open Design
+### Slides from Anything Shell
 
 Kept as the base:
 

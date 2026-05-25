@@ -1,6 +1,6 @@
 # Design Vault
 
-Design Vault turns a public website URL or design-system project source into a reusable Open Design style system: source evidence, semantic design profile, `design.md`, an open-slide theme, HTML/PPT previews, and agent-readable skill packages for imported design systems.
+Design Vault turns a public website URL or design-system project source into a reusable Slides from Anything style system: source evidence, semantic design profile, `design.md`, an open-slide theme, HTML/PPT previews, and agent-readable skill packages for imported design systems.
 
 ## Development
 
