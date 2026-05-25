@@ -1,0 +1,57 @@
+node_modules/
+dist/
+out/
+.next/
+.next-*/
+.tmp/
+.DS_Store
+*.log
+.vite
+.astro/
+.vscode
+
+# Local runtime data — auto-created by the daemon on first start.
+# Holds app.sqlite (project metadata), projects/<id>/ (per-project artifacts,
+# the agent's CWD), and artifacts/ (one-off renders). Never commit.
+.od
+.od-e2e
+test-results
+playwright-report
+e2e/.od-data
+e2e/playwright-report
+e2e/reports/html
+e2e/reports/playwright-html-report
+e2e/reports/test-results
+e2e/reports/results.json
+e2e/reports/junit.xml
+e2e/reports/latest.md
+
+# Design Vault runtime/source material. Keep the software, exclude imported
+# designs, captured website assets, generated previews, and community staging.
+apps/design-vault/data/*
+!apps/design-vault/data/.gitkeep
+apps/design-vault/tmp/
+apps/design-vault/.local/
+skills/dv-*/
+design-systems/dv-*/
+
+# Legacy folder name from before the rename; keep ignored so existing
+# clones don't accidentally stage stale runtime data.
+.ocd
+
+tsconfig.tsbuildinfo
+
+.claude-sessions/*
+
+.cursor/
+.agents/
+.opencode/
+.claude/
+.codex/
+.deepseek/
+
+# Commander task scratchpad; keep local task notes out of git by default.
+.task/
+task.md
+specs/change/active
+.ralph/

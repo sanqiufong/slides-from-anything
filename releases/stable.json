@@ -1,0 +1,6 @@
+{
+  "version": "1.0.0",
+  "channel": "stable",
+  "releasedAt": "2026-05-25T00:00:00.000Z",
+  "notes": "Initial public integration release of OpenPPT and Design Vault."
+}

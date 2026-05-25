@@ -1,0 +1,39 @@
+{
+  "name": "design-vault",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3217",
+    "build": "next build",
+    "start": "next start --port 3217",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint",
+    "ingest": "node --import tsx ./scripts/run-ingest.ts",
+    "refresh-design": "node --import tsx ./scripts/refresh-design.ts",
+    "regenerate-docs": "node --import tsx ./scripts/regenerate-design-docs.ts",
+    "validate-design-docs": "node --import tsx ./scripts/validate-design-docs.ts",
+    "audit-previews": "node --import tsx ./scripts/audit-design-previews.ts",
+    "audit-designs": "node --import tsx ./scripts/audit-design-quality.ts",
+    "publish-design": "node --import tsx ./scripts/publish-design.ts",
+    "install-bundle": "node --import tsx ./scripts/install-bundle.ts"
+  },
+  "dependencies": {
+    "cheerio": "^1.2.0",
+    "lucide-react": "^1.14.0",
+    "next": "16.2.5",
+    "playwright": "^1.60.0",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.5",
+    "tailwindcss": "^4",
+    "tsx": "^4.21.0",
+    "typescript": "^5"
+  }
+}

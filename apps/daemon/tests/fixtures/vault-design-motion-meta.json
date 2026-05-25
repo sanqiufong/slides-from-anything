@@ -1,0 +1,80 @@
+{
+  "slug": "fixture-motion-system",
+  "title": "Fixture Motion System",
+  "sourceHost": "example.com",
+  "sourceUrl": "https://example.com/motion-system",
+  "summary": "Synthetic non-user fixture for OpenPPT motion transfer tests.",
+  "profile": {
+    "archetype": "presentation motion fixture",
+    "visualThesis": "A compact interface system with source-observed motion recipes.",
+    "colorRoles": {
+      "background": "#101114",
+      "text": "#f5f5f0",
+      "brandPrimary": "#45c087"
+    },
+    "openSlideGuidance": {
+      "direction": "Use source-observed component motion before adding generic transitions.",
+      "motionApproach": [
+        "Keep persistent chrome visible.",
+        "Use a short fade only where the source evidence supports it."
+      ]
+    },
+    "componentMotionRecipes": [
+      {
+        "id": "fixed-header-persistent-chrome-1",
+        "component": "fixed-header",
+        "role": "persistent chrome",
+        "trigger": "scroll or state change",
+        "statePair": "default to compact",
+        "properties": [
+          "width"
+        ],
+        "timing": {
+          "duration": "150-250ms",
+          "easing": "cubic-bezier(0.2, 0.7, 0.2, 1)"
+        },
+        "choreography": [
+          "instant width shift",
+          "no fade"
+        ],
+        "cssHint": "transition: width .3s ease-in-out",
+        "pptAdapter": [
+          "shrink slide title on transition",
+          "maintain visibility"
+        ],
+        "evidence": [
+          "css:@keyframes",
+          "keyframe animation block exists"
+        ],
+        "confidence": "medium"
+      },
+      {
+        "id": "page-transition-route-change-2",
+        "component": "page-transition",
+        "role": "route change",
+        "trigger": "navigation",
+        "statePair": "leave to enter",
+        "properties": [
+          "opacity"
+        ],
+        "timing": {
+          "duration": "1s",
+          "easing": "cubic-bezier(0.2, 0.7, 0.2, 1)"
+        },
+        "choreography": [
+          "cross-fade between views"
+        ],
+        "cssHint": "transition: opacity .3s ease-in-out",
+        "pptAdapter": [
+          "fade between slide sections",
+          "avoid slide-push"
+        ],
+        "evidence": [
+          "css:.page-enter-active",
+          "transition:opacity .3s ease-in-out"
+        ],
+        "confidence": "medium"
+      }
+    ]
+  }
+}

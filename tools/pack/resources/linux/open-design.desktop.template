@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Slides from Anything (@@NAMESPACE@@)
+GenericName=Slides from Anything
+Comment=Turn anything into slides (@@NAMESPACE@@)
+Exec=env OD_PACKAGED_NAMESPACE=@@NAMESPACE@@ @@EXEC_PATH@@ --appimage-extract-and-run %U
+Icon=@@ICON_PATH@@
+Categories=Development;Utility;
+StartupWMClass=Slides from Anything
+StartupNotify=true
+Terminal=false
+MimeType=x-scheme-handler/od;

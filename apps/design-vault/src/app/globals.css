@@ -1,0 +1,348 @@
+@import "tailwindcss";
+
+/* ============================================================
+   Design Vault — visual language mirrored from open-design/web
+   (Claude.ai/design): warm paper, rust accent, serif headings.
+   ============================================================ */
+:root {
+  /* Warm paper surfaces. */
+  --background: #faf9f7;
+  --background-soft: #f4f2ed;
+  --surface: #ffffff;
+  --surface-muted: #f4f2ed;
+  --surface-elevated: #ffffff;
+
+  /* Ink-on-paper text scale. */
+  --foreground: #1a1916;
+  --foreground-strong: #0d0c0a;
+  --muted: #74716b;
+  --soft: #989590;
+  --faint: #b3b0a8;
+
+  /* Hairline borders. */
+  --line: #ebe8e1;
+  --line-strong: #d8d4cb;
+  --line-soft: #f1eee7;
+
+  /* Claude rust / burnt-sienna accent. */
+  --accent: #c96442;
+  --accent-strong: #b45a3b;
+  --accent-soft: #fbeee5;
+  --accent-tint: #f5d8cb;
+
+  /* Semantic palette tuned to the warm backdrop. */
+  --success: #1f7a3a;
+  --success-soft: #e8f7ee;
+  --warning: #b26200;
+  --warning-soft: #fff3e0;
+  --danger: #9c2a25;
+  --danger-soft: #fdecea;
+  --info: #2348b8;
+  --info-soft: #e8efff;
+
+  /* Layered paper shadows. */
+  --shadow-xs: 0 1px 0 rgba(28, 27, 26, 0.04);
+  --shadow-sm: 0 1px 2px rgba(28, 27, 26, 0.05), 0 1px 3px rgba(28, 27, 26, 0.04);
+  --shadow-md: 0 6px 24px rgba(28, 27, 26, 0.07), 0 2px 6px rgba(28, 27, 26, 0.04);
+  --shadow-lg: 0 24px 60px rgba(28, 27, 26, 0.16), 0 8px 16px rgba(28, 27, 26, 0.07);
+
+  /* Type stack. Inter + Source Serif 4 (mirrors claude.ai/design). */
+  --font-serif:
+    var(--font-source-serif), "Source Serif 4", "Source Serif Pro",
+    "Iowan Old Style", "Apple Garamond", Georgia, "Times New Roman", serif;
+  --font-sans:
+    var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  --font-mono:
+    "SF Mono", SFMono-Regular, ui-monospace, Menlo, Consolas,
+    "Liberation Mono", monospace;
+}
+
+/* Dark variables shared by explicit data-theme="dark" and the system-mode
+   media query below. Mirrors open-design web. */
+[data-theme="dark"] {
+  color-scheme: dark;
+  --background: #1a1917;
+  --background-soft: #272523;
+  --surface: #222120;
+  --surface-muted: #2e2c29;
+  --surface-elevated: #2a2825;
+
+  --foreground: #e8e4dc;
+  --foreground-strong: #f2ede4;
+  --muted: #9a9690;
+  --soft: #6e6b65;
+  --faint: #4e4b46;
+
+  --line: #333128;
+  --line-strong: #46433c;
+  --line-soft: #2a2825;
+
+  --accent: #d97a56;
+  --accent-strong: #e8896a;
+  --accent-soft: #3d2318;
+  --accent-tint: #2e1a12;
+
+  --success: #4caf72;
+  --success-soft: #0f2a18;
+  --warning: #e09a40;
+  --warning-soft: #2a1a04;
+  --danger: #e06b65;
+  --danger-soft: #2a0e0c;
+  --info: #6b8fe8;
+  --info-soft: #0f1a38;
+
+  --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6), 0 8px 16px rgba(0, 0, 0, 0.3);
+}
+
+/* System mode: follow OS preference when no explicit data-theme is set. */
+@media (prefers-color-scheme: dark) {
+  html:not([data-theme]) {
+    color-scheme: dark;
+    --background: #1a1917;
+    --background-soft: #272523;
+    --surface: #222120;
+    --surface-muted: #2e2c29;
+    --surface-elevated: #2a2825;
+
+    --foreground: #e8e4dc;
+    --foreground-strong: #f2ede4;
+    --muted: #9a9690;
+    --soft: #6e6b65;
+    --faint: #4e4b46;
+
+    --line: #333128;
+    --line-strong: #46433c;
+    --line-soft: #2a2825;
+
+    --accent: #d97a56;
+    --accent-strong: #e8896a;
+    --accent-soft: #3d2318;
+    --accent-tint: #2e1a12;
+
+    --success: #4caf72;
+    --success-soft: #0f2a18;
+    --warning: #e09a40;
+    --warning-soft: #2a1a04;
+    --danger: #e06b65;
+    --danger-soft: #2a0e0c;
+    --info: #6b8fe8;
+    --info-soft: #0f1a38;
+
+    --shadow-xs: 0 1px 0 rgba(0, 0, 0, 0.2);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.2);
+    --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.6), 0 8px 16px rgba(0, 0, 0, 0.3);
+  }
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-surface: var(--surface);
+  --color-surface-muted: var(--surface-muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-accent-soft: var(--accent-soft);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+}
+
+html {
+  background: var(--background);
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.55;
+  min-width: 320px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(201, 100, 66, 0.18);
+}
+
+a {
+  text-decoration: none;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+pre {
+  white-space: pre-wrap;
+}
+
+input,
+select,
+textarea {
+  min-width: 0;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* App backdrop: nearly flat warm cream with a whisper of vertical wash.
+   All stops derive from theme tokens so the shell follows light/dark. */
+.app-shell {
+  background:
+    radial-gradient(1200px 600px at 50% -10%, var(--surface) 0%, transparent 60%),
+    linear-gradient(180deg, var(--background) 0%, var(--background-soft) 100%);
+  color: var(--foreground);
+}
+
+/* Hairline panel shadow tuned for paper. */
+.panel-shadow {
+  box-shadow: var(--shadow-sm);
+}
+
+/* -------- Split layout shell -------------------------------------------
+   Mirrors open-design/apps/web .app + .split: a thin sticky topbar above
+   a fixed-width sidebar + a flexible main pane, with hard hairline rails
+   between them. The shell consumes 100vh so the two panes scroll
+   independently — no more whole-page scroll.
+   --------------------------------------------------------------------- */
+.dv-app {
+  display: grid;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+  min-height: 100vh;
+  background: var(--background);
+  color: var(--foreground);
+}
+
+.dv-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-wrap: nowrap;
+}
+
+.dv-topbar-divider {
+  height: 18px;
+  width: 1px;
+  background: var(--line);
+  flex: none;
+}
+
+.dv-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.dv-pane-main {
+  background: var(--background);
+  padding: 16px;
+}
+
+@media (min-width: 1280px) {
+  .dv-pane-main {
+    padding: 24px 32px;
+  }
+}
+
+/* Inner section heading used inside sidebar panels — no card chrome,
+   relies on parent pane background. */
+.dv-pane-section {
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.dv-pane-section:last-child {
+  border-bottom: 0;
+}
+
+/* Serif display for editorial headings — pairs with sans body. */
+.font-serif {
+  font-family: var(--font-serif);
+  font-feature-settings: "ss01" on, "ss02" on;
+  letter-spacing: -0.012em;
+}
+
+/* Subtle horizontal hairline used between sections. */
+.hairline {
+  border-color: var(--line);
+}
+
+/* Inline mono pill for paths / commands. */
+.dv-mono-pill {
+  font-family: var(--font-mono);
+  background: var(--surface-muted);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 1px 6px;
+  font-size: 12px;
+  color: var(--foreground);
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+.dv-two-line-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-width: 100%;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  word-break: normal;
+}
+
+.dv-wrap-anywhere {
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/* Editorial micro-uppercase label used for section eyebrows. */
+.dv-eyebrow {
+  font-size: 10.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 600;
+  color: var(--faint);
+}
+
+/* Toast notifications (HomeLibrary). Slide-down + fade-in from top. */
+@keyframes dv-toast-in {
+  from { transform: translateY(-12px); opacity: 0; }
+  to   { transform: translateY(0);     opacity: 1; }
+}
+.dv-toast {
+  animation: dv-toast-in 180ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}

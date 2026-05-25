@@ -1,0 +1,873 @@
+import { Fragment, useEffect, useRef, useState } from 'react';
+import { useT } from '../i18n';
+import type { Dict } from '../i18n/types';
+import { projectRawUrl } from '../providers/registry';
+import type { TodoItem } from '../runtime/todos';
+import type { ChatAttachment, ChatCommentAttachment, ChatMessage, ChatVaultContextAttachment, Conversation, PreviewComment, ProjectFile, ProjectMetadata, VaultDesignMeta } from '../types';
+import { dayKey, dayLabel, exactDateTime, messageTime, relativeTimeLong } from '../utils/chatTime';
+import { commentsToAttachments, simplePositionLabel } from '../comments';
+import { AssistantMessage } from './AssistantMessage';
+import { ChatComposer, type ChatComposerHandle } from './ChatComposer';
+import { Icon } from './Icon';
+
+type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
+
+// Featured starter prompts shown on the empty chat. Clicking one fills
+// the composer (does not auto-send) so users can tweak before sending.
+// Each prompt is intentionally dense — it should showcase ambitious
+// layout, typographic, and information-design moves rather than a
+// generic landing page.
+const EXAMPLE_PROMPT_KEYS: Array<{
+  icon: string;
+  titleKey: keyof Dict;
+  tagKey: keyof Dict;
+  promptKey: keyof Dict;
+}> = [
+  {
+    icon: '▤',
+    titleKey: 'chat.example1Title',
+    tagKey: 'chat.example1Tag',
+    promptKey: 'chat.example1Prompt',
+  },
+  {
+    icon: '▦',
+    titleKey: 'chat.example2Title',
+    tagKey: 'chat.example2Tag',
+    promptKey: 'chat.example2Prompt',
+  },
+  {
+    icon: '◈',
+    titleKey: 'chat.example3Title',
+    tagKey: 'chat.example3Tag',
+    promptKey: 'chat.example3Prompt',
+  },
+];
+
+interface Props {
+  messages: ChatMessage[];
+  streaming: boolean;
+  collapsed?: boolean;
+  onCollapsedChange?: (collapsed: boolean) => void;
+  error: string | null;
+  projectId: string | null;
+  projectFiles: ProjectFile[];
+  // Names that exist in the project folder. Tool cards and chips use this
+  // set to decide whether a path can be opened as a tab.
+  projectFileNames?: Set<string>;
+  onEnsureProject: () => Promise<string | null>;
+  previewComments?: PreviewComment[];
+  attachedComments?: PreviewComment[];
+  onAttachComment?: (comment: PreviewComment) => void;
+  onDetachComment?: (commentId: string) => void;
+  onDeleteComment?: (commentId: string) => void;
+  onSend: (
+    prompt: string,
+    attachments: ChatAttachment[],
+    commentAttachments: ChatCommentAttachment[],
+    vaultContextAttachments?: ChatVaultContextAttachment[],
+  ) => void | boolean | Promise<void | boolean>;
+  onStop: () => void;
+  // Click-to-open chain: passes a basename up to ProjectView, which sets
+  // FileWorkspace's openRequest. Tool cards, attachment chips, and
+  // produced-file chips all call this.
+  onRequestOpenFile?: (name: string) => void;
+  initialDraft?: string;
+  // Question-form submissions become a normal user message; the parent
+  // routes that text through onSend (no attachments).
+  onSubmitForm?: (text: string) => void;
+  onVaultTemplateSelect?: (design: VaultDesignMeta) => void | Promise<void>;
+  onContinueRemainingTasks?: (assistantMessage: ChatMessage, todos: TodoItem[]) => void;
+  // Header "+" button — kicks off ProjectView's create-conversation flow.
+  onNewConversation?: () => void;
+  // Conversation list that used to live in the topbar. The chat tab now
+  // owns the list so users can browse + switch conversations without
+  // leaving the pane.
+  conversations: Conversation[];
+  activeConversationId: string | null;
+  onSelectConversation: (id: string) => void;
+  onDeleteConversation: (id: string) => void;
+  onRenameConversation?: (id: string, title: string) => void;
+  // Composer settings/CLI button forwards to here. The dialog lives in App
+  // (it owns the config lifecycle) so we just pass the open trigger.
+  onOpenSettings?: () => void;
+  projectMetadata?: ProjectMetadata;
+  onProjectMetadataChange?: (metadata: ProjectMetadata) => void;
+}
+
+type Tab = 'chat' | 'comments';
+
+export function ChatPane({
+  messages,
+  streaming,
+  collapsed = false,
+  onCollapsedChange,
+  error,
+  projectId,
+  projectFiles,
+  projectFileNames,
+  onEnsureProject,
+  previewComments = [],
+  attachedComments = [],
+  onAttachComment,
+  onDetachComment,
+  onDeleteComment,
+  onSend,
+  onStop,
+  onRequestOpenFile,
+  initialDraft,
+  onSubmitForm,
+  onVaultTemplateSelect,
+  onContinueRemainingTasks,
+  onNewConversation,
+  conversations,
+  activeConversationId,
+  onSelectConversation,
+  onDeleteConversation,
+  onRenameConversation,
+  onOpenSettings,
+  projectMetadata,
+  onProjectMetadataChange,
+}: Props) {
+  const t = useT();
+  const logRef = useRef<HTMLDivElement | null>(null);
+  const historyWrapRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<ChatComposerHandle | null>(null);
+  const didInitialScrollRef = useRef(false);
+  const [tab, setTab] = useState<Tab>('chat');
+  const [showConvList, setShowConvList] = useState(false);
+  const [scrolledFromBottom, setScrolledFromBottom] = useState(false);
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === 'assistant')?.id;
+  const hasActiveRunMessage = messages.some(
+    (m) => m.role === 'assistant' && isActiveRunStatus(m.runStatus),
+  );
+  // Map each assistant message id to the user message that follows it
+  // (if any) so QuestionFormView can render its locked "answered" state
+  // with the user's picks.
+  const nextUserContentByAssistantId = (() => {
+    const map = new Map<string, string>();
+    for (let i = 0; i < messages.length - 1; i++) {
+      const m = messages[i]!;
+      const next = messages[i + 1]!;
+      if (m.role === 'assistant' && next.role === 'user') {
+        map.set(m.id, next.content);
+      }
+    }
+    return map;
+  })();
+
+  useEffect(() => {
+    didInitialScrollRef.current = false;
+  }, [activeConversationId]);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el || didInitialScrollRef.current || messages.length === 0) return;
+    didInitialScrollRef.current = true;
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight;
+      setScrolledFromBottom(false);
+    });
+  }, [activeConversationId, messages.length]);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    // Auto-scroll only when we're already pinned near the bottom — preserves
+    // a user's scrollback position when they're reading earlier output while
+    // a new turn streams in.
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    if (distance < 80) {
+      el.scrollTop = el.scrollHeight;
+    }
+  }, [messages, error]);
+
+  useEffect(() => {
+    const el = logRef.current;
+    if (!el) return;
+    function onScroll() {
+      const target = logRef.current;
+      if (!target) return;
+      const distance =
+        target.scrollHeight - target.scrollTop - target.clientHeight;
+      setScrolledFromBottom(distance > 120);
+    }
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+
+  // Close the conversation history dropdown on outside click / Escape.
+  useEffect(() => {
+    if (!showConvList) return;
+    function onPointer(e: MouseEvent) {
+      const target = e.target as Node;
+      if (historyWrapRef.current?.contains(target)) return;
+      setShowConvList(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') setShowConvList(false);
+    }
+    document.addEventListener('mousedown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [showConvList]);
+
+  const activeConversation =
+    conversations.find((c) => c.id === activeConversationId) ?? null;
+  const deckStyleStatus =
+    projectMetadata?.kind === 'deck'
+      ? projectMetadata.vaultTemplate?.title
+        ? {
+            state: 'locked' as const,
+            title: `Vault locked: ${projectMetadata.vaultTemplate.title}`,
+            body: projectMetadata.vaultTemplate.visualThesis
+              ?? projectMetadata.vaultTemplate.summary
+              ?? 'The selected Vault template is active in the generation prompt and starter slide design tokens.',
+          }
+        : {
+            state: 'unbound' as const,
+            title: 'Style template will be chosen in chat',
+            body: 'Share the deck brief first. The agent will match Design Vault templates to the task, explain the fit, and ask you to choose before generation.',
+          }
+      : null;
+
+  function jumpToBottom() {
+    const el = logRef.current;
+    if (!el) return;
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  }
+
+  const activeRun = streaming || hasActiveRunMessage;
+
+  return (
+    <div className={`pane chat-pane${collapsed ? ' collapsed' : ''}`} data-testid="chat-pane">
+      <div className="chat-collapsed-rail" aria-hidden={!collapsed}>
+        <button
+          type="button"
+          className="chat-rail-button primary"
+          title={t('chat.expandPane')}
+          aria-label={t('chat.expandPane')}
+          onClick={() => onCollapsedChange?.(false)}
+        >
+          <Icon name="chevron-right" size={15} />
+        </button>
+        <button
+          type="button"
+          className={`chat-rail-button${tab === 'chat' ? ' active' : ''}`}
+          title={t('chat.tabChat')}
+          aria-label={t('chat.tabChat')}
+          onClick={() => {
+            setTab('chat');
+            onCollapsedChange?.(false);
+          }}
+        >
+          <Icon name="comment" size={15} />
+        </button>
+        <button
+          type="button"
+          className={`chat-rail-button${tab === 'comments' ? ' active' : ''}`}
+          title={t('chat.tabComments')}
+          aria-label={t('chat.tabComments')}
+          onClick={() => {
+            setTab('comments');
+            onCollapsedChange?.(false);
+          }}
+        >
+          <Icon name="target" size={15} />
+          {previewComments.length > 0 ? (
+            <span className="chat-rail-badge">{Math.min(previewComments.length, 99)}</span>
+          ) : null}
+        </button>
+        <span className="chat-rail-spacer" />
+        {activeRun ? (
+          <span className="chat-rail-run" title={t('chat.agentRunning')} aria-label={t('chat.agentRunning')} />
+        ) : null}
+        <button
+          type="button"
+          className="chat-rail-button"
+          title={t('chat.newConversationsTitle')}
+          aria-label={t('chat.newConversation')}
+          onClick={() => {
+            onCollapsedChange?.(false);
+            onNewConversation?.();
+          }}
+          disabled={!onNewConversation}
+        >
+          <Icon name="plus" size={15} />
+        </button>
+      </div>
+      <div className="chat-pane-content" aria-hidden={collapsed}>
+      <div className="chat-header">
+        <div className="chat-header-tabs" role="tablist">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'chat'}
+            className={`chat-header-tab${tab === 'chat' ? ' active' : ''}`}
+            onClick={() => setTab('chat')}
+          >
+            {t('chat.tabChat')}
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === 'comments'}
+            className={`chat-header-tab${tab === 'comments' ? ' active' : ''}`}
+            onClick={() => setTab('comments')}
+          >
+            {t('chat.tabComments')}
+          </button>
+        </div>
+        <div className="chat-header-actions">
+          <button
+            type="button"
+            className="icon-only"
+            data-testid="chat-collapse-trigger"
+            title={t('chat.collapsePane')}
+            aria-label={t('chat.collapsePane')}
+            aria-expanded={!collapsed}
+            onClick={() => onCollapsedChange?.(true)}
+            disabled={!onCollapsedChange}
+          >
+            <Icon name="chevron-left" size={15} />
+          </button>
+          <div
+            className={`chat-history-wrap${showConvList ? ' open' : ''}`}
+            ref={historyWrapRef}
+          >
+            <button
+              type="button"
+              className="icon-only"
+              data-testid="conversation-history-trigger"
+              title={
+                activeConversation?.title
+                  ? `${t('chat.conversationsTitle')} · ${activeConversation.title}`
+                  : t('chat.conversationsTitle')
+              }
+              aria-label={t('chat.conversationsAria')}
+              aria-haspopup="menu"
+              aria-expanded={showConvList}
+              onClick={() => setShowConvList((v) => !v)}
+            >
+              <Icon name="history" size={15} />
+              {conversations.length > 1 ? (
+                <span className="chat-history-badge">{conversations.length}</span>
+              ) : null}
+            </button>
+            {showConvList ? (
+              <div className="chat-history-menu" role="menu" data-testid="conversation-history-menu">
+                <div className="chat-history-menu-head">
+                  <span className="chat-history-menu-title">
+                    {t('chat.conversationsHeading')}
+                  </span>
+                  {onNewConversation ? (
+                    <button
+                      type="button"
+                      className="chat-history-new"
+                      data-testid="conversation-history-new"
+                      onClick={() => {
+                        onNewConversation();
+                        setShowConvList(false);
+                      }}
+                    >
+                      <Icon name="plus" size={11} />
+                      <span>{t('chat.new')}</span>
+                    </button>
+                  ) : null}
+                </div>
+                <div className="chat-history-list" data-testid="conversation-list">
+                  {conversations.length === 0 ? (
+                    <div className="chat-history-empty">
+                      {t('chat.emptyConversations')}
+                    </div>
+                  ) : (
+                    conversations.map((c) => (
+                      <ConversationRow
+                        key={c.id}
+                        conversation={c}
+                        active={c.id === activeConversationId}
+                        onSelect={() => {
+                          onSelectConversation(c.id);
+                          setShowConvList(false);
+                        }}
+                        onDelete={() => onDeleteConversation(c.id)}
+                        onRename={onRenameConversation}
+                        t={t}
+                      />
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            className="icon-only"
+            data-testid="new-conversation"
+            title={t('chat.newConversationsTitle')}
+            aria-label={t('chat.newConversation')}
+            onClick={onNewConversation}
+            disabled={!onNewConversation}
+          >
+            <Icon name="plus" size={16} />
+          </button>
+        </div>
+      </div>
+      {tab === 'chat' ? (
+        <>
+          <div className="chat-log-wrap">
+            <div className="chat-log" ref={logRef}>
+              {deckStyleStatus ? (
+                <div className={`deck-style-status ${deckStyleStatus.state}`}>
+                  <span className="deck-style-status-title">{deckStyleStatus.title}</span>
+                  <span className="deck-style-status-body">{deckStyleStatus.body}</span>
+                </div>
+              ) : null}
+              {messages.length === 0 ? (
+                <div className="chat-empty-wrap">
+                  <div className="chat-empty">
+                    <span className="chat-empty-title">
+                      {t('chat.startTitle')}
+                    </span>
+                    <span className="chat-empty-hint">
+                      {t('chat.startHint')}
+                    </span>
+                  </div>
+                  <div className="chat-examples" role="list">
+                    {EXAMPLE_PROMPT_KEYS.map((ex, i) => {
+                      const title = t(ex.titleKey);
+                      const tag = t(ex.tagKey);
+                      const prompt = t(ex.promptKey);
+                      return (
+                        <button
+                          key={ex.titleKey}
+                          type="button"
+                          role="listitem"
+                          className="chat-example"
+                          style={{ animationDelay: `${i * 70}ms` }}
+                          onClick={() => composerRef.current?.setDraft(prompt)}
+                          title={t('chat.fillInputTitle')}
+                        >
+                          <span className="chat-example-icon" aria-hidden>
+                            {ex.icon}
+                          </span>
+                          <span className="chat-example-body">
+                            <span className="chat-example-head">
+                              <span className="chat-example-title">{title}</span>
+                              <span className="chat-example-tag">{tag}</span>
+                            </span>
+                            <span className="chat-example-prompt">{prompt}</span>
+                          </span>
+                          <span className="chat-example-cta" aria-hidden>
+                            ↵
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              {messages.map((m, i) => {
+                const showDaySeparator = shouldShowDaySeparator(messages[i - 1], m);
+                const messageStreaming =
+                  m.role === 'assistant' &&
+                  ((streaming && m.id === lastAssistantId) || isActiveRunStatus(m.runStatus));
+                return (
+                  <Fragment key={m.id}>
+                    {showDaySeparator ? <DaySeparator ts={messageTime(m)} /> : null}
+                    {m.role === 'user' ? (
+                      <UserMessage
+                        message={m}
+                        projectId={projectId}
+                        projectFileNames={projectFileNames}
+                        onRequestOpenFile={onRequestOpenFile}
+                        t={t}
+                      />
+                    ) : (
+                      <AssistantMessage
+                        message={m}
+                        streaming={messageStreaming}
+                        projectId={projectId}
+                        projectFileNames={projectFileNames}
+                        onRequestOpenFile={onRequestOpenFile}
+                        isLast={m.id === lastAssistantId}
+                        nextUserContent={nextUserContentByAssistantId.get(m.id)}
+                        onSubmitForm={onSubmitForm}
+                        activeVaultTemplateSlug={projectMetadata?.vaultTemplate?.slug ?? null}
+                        onVaultTemplateSelect={onVaultTemplateSelect}
+                        onContinueRemainingTasks={
+                          m.id === lastAssistantId && onContinueRemainingTasks
+                            ? (todos) => onContinueRemainingTasks(m, todos)
+                            : undefined
+                        }
+                      />
+                    )}
+                  </Fragment>
+                );
+              })}
+              {error ? <div className="msg error">{error}</div> : null}
+            </div>
+            {scrolledFromBottom ? (
+              <button
+                type="button"
+                className="chat-jump-btn"
+                onClick={jumpToBottom}
+                title={t('chat.scrollToLatest')}
+              >
+                <Icon name="arrow-up" size={12} style={{ transform: 'rotate(180deg)' }} />
+                <span>{t('chat.jumpToLatest')}</span>
+              </button>
+            ) : null}
+          </div>
+          <ChatComposer
+            ref={composerRef}
+            projectId={projectId}
+            projectFiles={projectFiles}
+            streaming={activeRun}
+            initialDraft={initialDraft}
+            onEnsureProject={onEnsureProject}
+            commentAttachments={commentsToAttachments(attachedComments)}
+            onRemoveCommentAttachment={onDetachComment}
+            onSend={onSend}
+            onStop={onStop}
+            onOpenSettings={onOpenSettings}
+            projectMetadata={projectMetadata}
+            onProjectMetadataChange={onProjectMetadataChange}
+          />
+        </>
+      ) : null}
+      {tab === 'comments' ? (
+        <CommentsPanel
+          comments={previewComments}
+          attachedComments={attachedComments}
+          onAttach={onAttachComment}
+          onDetach={onDetachComment}
+          onDelete={onDeleteComment}
+          t={t}
+        />
+      ) : null}
+      </div>
+    </div>
+  );
+}
+
+function CommentsPanel({
+  comments,
+  attachedComments,
+  onAttach,
+  onDetach,
+  onDelete,
+  t,
+}: {
+  comments: PreviewComment[];
+  attachedComments: PreviewComment[];
+  onAttach?: (comment: PreviewComment) => void;
+  onDetach?: (commentId: string) => void;
+  onDelete?: (commentId: string) => void;
+  t: TranslateFn;
+}) {
+  const attachedIds = new Set(attachedComments.map((comment) => comment.id));
+  const saved = comments.filter((comment) => !attachedIds.has(comment.id));
+  return (
+    <div className="comments-panel" data-testid="comments-panel">
+      <CommentSection
+        title={t('chat.comments.attached')}
+        empty={t('chat.comments.emptyAttached')}
+        comments={attachedComments}
+        actionLabel={t('chat.comments.remove')}
+        onAction={(comment) => onDetach?.(comment.id)}
+        attached
+      />
+      <CommentSection
+        title={t('chat.comments.saved')}
+        empty={t('chat.comments.emptySaved')}
+        comments={saved}
+        actionLabel={t('chat.comments.add')}
+        onAction={(comment) => onAttach?.(comment)}
+        secondaryActionLabel={t('chat.comments.remove')}
+        onSecondaryAction={(comment) => onDelete?.(comment.id)}
+      />
+      {saved.length > 0 ? (
+        <div className="comments-footer">
+          <button
+            type="button"
+            className="primary"
+            onClick={() => saved.forEach((comment) => onAttach?.(comment))}
+          >
+            {t('chat.comments.addAll')}
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CommentSection({
+  title,
+  empty,
+  comments,
+  actionLabel,
+  onAction,
+  secondaryActionLabel,
+  onSecondaryAction,
+  attached,
+}: {
+  title: string;
+  empty: string;
+  comments: PreviewComment[];
+  actionLabel: string;
+  onAction: (comment: PreviewComment) => void;
+  secondaryActionLabel?: string;
+  onSecondaryAction?: (comment: PreviewComment) => void;
+  attached?: boolean;
+}) {
+  return (
+    <section className="comments-section">
+      <h3>{title}</h3>
+      {comments.length === 0 ? (
+        <p className="comments-empty">{empty}</p>
+      ) : (
+        comments.map((comment) => (
+          <article
+            key={comment.id}
+            className={`comment-card${attached ? ' attached' : ''}`}
+            data-testid={`comment-card-${comment.elementId}`}
+          >
+            <div className="comment-card-top">
+              <strong>{comment.elementId}</strong>
+              <div className="comment-card-actions">
+                {secondaryActionLabel && onSecondaryAction ? (
+                  <button
+                    type="button"
+                    className="comment-card-action danger"
+                    onClick={() => onSecondaryAction(comment)}
+                  >
+                    {secondaryActionLabel}
+                  </button>
+                ) : null}
+                <button type="button" className="comment-card-action" onClick={() => onAction(comment)}>
+                  {actionLabel}
+                </button>
+              </div>
+            </div>
+            <p>{comment.note}</p>
+            <div className="comment-card-meta">
+              <span>{comment.id}</span>
+              <span>{comment.filePath}</span>
+              <span>{comment.label}</span>
+              <span>{simplePositionLabel(comment.position)}</span>
+            </div>
+          </article>
+        ))
+      )}
+    </section>
+  );
+}
+
+function isActiveRunStatus(status: ChatMessage['runStatus']): boolean {
+  return status === 'queued' || status === 'running';
+}
+
+function ConversationRow({
+  conversation,
+  active,
+  onSelect,
+  onDelete,
+  onRename,
+  t,
+}: {
+  conversation: Conversation;
+  active: boolean;
+  onSelect: () => void;
+  onDelete: () => void;
+  onRename?: (id: string, title: string) => void;
+  t: TranslateFn;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(conversation.title ?? '');
+  const displayTitle =
+    conversation.title || t('chat.untitledConversation');
+  return (
+    <div
+      className={`chat-conv-item${active ? ' active' : ''}`}
+      data-testid={`conversation-item-${conversation.id}`}
+    >
+      {editing && onRename ? (
+        <input
+          autoFocus
+          className="chat-conv-rename-input"
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={() => {
+            onRename(conversation.id, draft);
+            setEditing(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              onRename(conversation.id, draft);
+              setEditing(false);
+            } else if (e.key === 'Escape') {
+              setEditing(false);
+            }
+          }}
+          style={{ flex: 1, padding: '2px 6px', fontSize: 12 }}
+        />
+      ) : (
+        <button
+          type="button"
+          className="chat-conv-item-name"
+          data-testid={`conversation-select-${conversation.id}`}
+          style={{ background: 'transparent', border: 'none', padding: 0, textAlign: 'left' }}
+          onClick={onSelect}
+          onDoubleClick={() => {
+            if (!onRename) return;
+            setDraft(conversation.title ?? '');
+            setEditing(true);
+          }}
+        >
+          {displayTitle}
+        </button>
+      )}
+      <span className="chat-conv-item-meta">{relTime(conversation.updatedAt, t)}</span>
+      <button
+        type="button"
+        className="chat-conv-item-del"
+        data-testid={`conversation-delete-${conversation.id}`}
+        title={t('chat.deleteConversation')}
+        onClick={(e) => {
+          e.stopPropagation();
+          if (
+            confirm(t('chat.deleteConversationConfirm', { title: displayTitle }))
+          ) {
+            onDelete();
+          }
+        }}
+      >
+        <Icon name="close" size={12} />
+      </button>
+    </div>
+  );
+}
+
+function UserMessage({
+  message,
+  projectId,
+  projectFileNames,
+  onRequestOpenFile,
+  t,
+}: {
+  message: ChatMessage;
+  projectId: string | null;
+  projectFileNames?: Set<string>;
+  onRequestOpenFile?: (name: string) => void;
+  t: TranslateFn;
+}) {
+  const attachments = message.attachments ?? [];
+  const commentAttachments = message.commentAttachments ?? [];
+  const vaultContextAttachments = message.vaultContextAttachments ?? [];
+  return (
+    <div className="msg user">
+      <div className="role">
+        <span>{t('chat.you')}</span>
+        <MessageTimestamp message={message} t={t} />
+      </div>
+      {attachments.length > 0 ? (
+        <div className="user-attachments">
+          {attachments.map((a) => {
+            const baseName = a.path.split('/').pop() || a.path;
+            const openable =
+              !!onRequestOpenFile &&
+              (projectFileNames ? projectFileNames.has(baseName) : true);
+            const handleOpen = openable
+              ? () => onRequestOpenFile?.(baseName)
+              : undefined;
+            return (
+              <button
+                type="button"
+                key={a.path}
+                className={`user-attachment staged-${a.kind}${openable ? ' openable' : ''}`}
+                onClick={handleOpen}
+                disabled={!openable}
+                title={openable ? t('chat.openFile', { name: baseName }) : a.path}
+              >
+                {a.kind === 'image' && projectId ? (
+                  <img src={projectRawUrl(projectId, a.path)} alt={a.name} />
+                ) : (
+                  <Icon name="file" size={14} />
+                )}
+                <span className="staged-name">{a.name}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : null}
+      {commentAttachments.length > 0 ? (
+        <div className="user-attachments comment-history-attachments">
+          {commentAttachments.map((a) => (
+            <span key={a.id} className="user-attachment staged-comment">
+              <span className="staged-name">
+                <strong>{a.elementId}</strong>
+                <span>{a.comment}</span>
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {vaultContextAttachments.length > 0 ? (
+        <div className="user-attachments vault-context-history-attachments">
+          {vaultContextAttachments.map((a) => (
+            <span key={a.slug} className="user-attachment staged-vault-context">
+              <Icon name={a.kind === 'skill-package' ? 'sparkles' : 'file'} size={14} />
+              <span className="staged-name">
+                <strong>{a.title}</strong>
+                <span>{a.kind === 'skill-package' ? t('chat.vaultContextSkill') : t('chat.vaultContextDesignSystem')}</span>
+              </span>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {message.content ? <div className="user-text">{message.content}</div> : null}
+    </div>
+  );
+}
+
+function DaySeparator({ ts }: { ts: number | undefined }) {
+  if (!ts) return null;
+  return (
+    <div className="chat-day-separator" role="separator">
+      <time dateTime={new Date(ts).toISOString()}>{dayLabel(ts)}</time>
+    </div>
+  );
+}
+
+function MessageTimestamp({ message, t }: { message: ChatMessage; t: TranslateFn }) {
+  const ts = messageTime(message);
+  if (!ts) return null;
+  return (
+    <time className="msg-time" dateTime={new Date(ts).toISOString()} title={exactDateTime(ts)}>
+      {relativeTimeLong(ts, t)}
+    </time>
+  );
+}
+
+function shouldShowDaySeparator(prev: ChatMessage | undefined, curr: ChatMessage): boolean {
+  const currTime = messageTime(curr);
+  if (!currTime) return false;
+  const prevTime = prev ? messageTime(prev) : undefined;
+  if (!prevTime) return true;
+  return dayKey(prevTime) !== dayKey(currTime);
+}
+
+function relTime(ts: number, t: TranslateFn): string {
+  const diff = Date.now() - ts;
+  const min = 60_000;
+  const hr = 60 * min;
+  const day = 24 * hr;
+  if (diff < min) return t('common.now');
+  if (diff < hr) return t('common.minutesShort', { n: Math.floor(diff / min) });
+  if (diff < day) return t('common.hoursShort', { n: Math.floor(diff / hr) });
+  if (diff < 7 * day) return t('common.daysShort', { n: Math.floor(diff / day) });
+  return new Date(ts).toLocaleDateString();
+}

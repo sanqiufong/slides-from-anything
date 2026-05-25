@@ -1,0 +1,25 @@
+{
+  "name": "@design-vault/community-server",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3300",
+    "build": "next build",
+    "start": "next start --port 3300",
+    "lint": "eslint"
+  },
+  "dependencies": {
+    "next": "16.2.5",
+    "postgres": "^3.4.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.5",
+    "typescript": "^5"
+  }
+}
