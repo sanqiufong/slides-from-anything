@@ -1,5 +1,7 @@
 # Slides from Anything
 
+**English** | [简体中文](README.zh-CN.md)
+
 Slides from Anything is a local-first slide creation workspace that combines the
 OpenPPT slide authoring/runtime stack with the Design Vault template and style
 system. The goal is simple: open one project, run the real product UI, import or
