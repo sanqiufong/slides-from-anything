@@ -19,7 +19,7 @@ import type { DesignMeta } from "@/lib/types";
  * Anchor bundle-root-relative URLs (e.g. `assets/foo.png` emitted by
  * preview.ts / card-preview.ts) to the local file route. Inserts as the
  * FIRST child of `<head>` so it precedes any `<link>` / `<style>` siblings.
- * Old HTMLs that use absolute `/api/designs/<slug>/asset/...` are unaffected
+ * Absolute `/api/designs/<slug>/asset/...` URLs are rewritten separately below
  * because `<base>` only governs relative refs.
  */
 function injectBundleBase(html: string, slug: string): string {
@@ -32,6 +32,13 @@ function injectBundleBase(html: string, slug: string): string {
     return html.replace(/<html\b[^>]*>/i, (m) => `${m}<head>${tag}</head>`);
   }
   return `<head>${tag}</head>${html}`;
+}
+
+function rewriteDesignAssetUrls(html: string, slug: string): string {
+  return html.replace(/(["'(=])\/api\/designs\/([a-z0-9][a-z0-9-]*)\/asset\//g, (match, prefix: string, embeddedSlug: string) => {
+    if (embeddedSlug === slug) return match;
+    return `${prefix}/api/designs/${slug}/asset/`;
+  });
 }
 
 function injectTokensIntoHtml(html: string, design: DesignMeta): string {
@@ -115,10 +122,10 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
   // Always re-inject the token stylesheet — handles the historical-cache
   // case (pre-W1.4 previews on disk that have no `--dv-*` vars).
   const withTokens = injectTokensIntoHtml(rawHtml, design);
+  const withCurrentAssets = rewriteDesignAssetUrls(withTokens, slug);
   // Then anchor bundle-relative asset URLs (`assets/foo.png`) to the file
-  // route. Harmless for legacy previews that use absolute `/api/designs/...`
-  // URLs since `<base>` only affects relative URLs.
-  const html = injectBundleBase(withTokens, slug);
+  // route. Absolute `/api/designs/...` URLs were normalized above.
+  const html = injectBundleBase(withCurrentAssets, slug);
 
   return new NextResponse(html, { headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }

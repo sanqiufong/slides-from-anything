@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { NextResponse } from "next/server";
 
-import { designDir, pathExists } from "@/lib/storage";
+import { designDir, isSafeDesignSlug, pathExists } from "@/lib/storage";
 
 const MIME_BY_EXT: Record<string, string> = {
   ".svg": "image/svg+xml",
@@ -17,11 +17,26 @@ const MIME_BY_EXT: Record<string, string> = {
   ".webm": "video/webm",
 };
 
+async function resolveAssetPath(slug: string, assetPath: string[]) {
+  const candidates = [slug, slug.startsWith("community-") ? null : `community-${slug}`].filter((value): value is string => Boolean(value));
+  for (const candidate of candidates) {
+    if (!isSafeDesignSlug(candidate)) continue;
+    const filePath = path.join(designDir(candidate), "assets", ...assetPath);
+    if (await pathExists(filePath)) return filePath;
+  }
+  return null;
+}
+
 export async function GET(_: Request, context: { params: Promise<{ slug: string; assetPath: string[] }> }) {
   const { slug, assetPath } = await context.params;
-  if (assetPath.some((segment) => segment === "..")) return NextResponse.json({ error: "Invalid path." }, { status: 400 });
-  const filePath = path.join(designDir(slug), "assets", ...assetPath);
-  if (!(await pathExists(filePath))) return NextResponse.json({ error: "Asset not found." }, { status: 404 });
+  if (
+    !isSafeDesignSlug(slug) ||
+    assetPath.some((segment) => segment === ".." || segment.includes("/") || segment.includes("\\"))
+  ) {
+    return NextResponse.json({ error: "Invalid path." }, { status: 400 });
+  }
+  const filePath = await resolveAssetPath(slug, assetPath);
+  if (!filePath) return NextResponse.json({ error: "Asset not found." }, { status: 404 });
 
   const buffer = await readFile(filePath);
   return new NextResponse(buffer, { headers: { "content-type": MIME_BY_EXT[path.extname(filePath).toLowerCase()] ?? "application/octet-stream", "cache-control": "public, max-age=3600" } });
