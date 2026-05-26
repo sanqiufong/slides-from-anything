@@ -666,6 +666,19 @@ function layerBox(layer) {
   };
 }
 
+function expandBox(box, padX, padY) {
+  const x = Math.max(0, box.x - padX);
+  const y = Math.max(0, box.y - padY);
+  const right = Math.min(PPTX_WIDTH, box.x + box.w + padX);
+  const bottom = Math.min(PPTX_HEIGHT, box.y + box.h + padY);
+  return {
+    x,
+    y,
+    w: Math.max(0, right - x),
+    h: Math.max(0, bottom - y),
+  };
+}
+
 function hexByte(value) {
   return Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0').toUpperCase();
 }
@@ -738,6 +751,16 @@ function parseCssPx(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function normalizePptxImageFit(layer) {
+  const objectFit = String(layer.objectFit || '').trim().toLowerCase();
+  if (objectFit === 'contain' || objectFit === 'scale-down') return 'contain';
+  if (objectFit === 'cover') return 'cover';
+  const backgroundSize = String(layer.backgroundSize || '').trim().toLowerCase();
+  if (backgroundSize.includes('contain')) return 'contain';
+  if (backgroundSize.includes('cover')) return 'cover';
+  return null;
+}
+
 function imageSourceForPptx(src, exportDir) {
   const raw = String(src || '').trim();
   if (!raw) return null;
@@ -781,18 +804,23 @@ function addShapeLayer(pptx, slide, layer) {
 }
 
 function addTextLayer(slide, layer) {
-  const box = layerBox(layer);
-  if (!box || !String(layer.text || '').trim()) return false;
+  const rawBox = layerBox(layer);
+  if (!rawBox || !String(layer.text || '').trim()) return false;
   const color = parseCssColor(layer.color) || { color: '111111', transparency: 0 };
   const fontSizePx = parseCssPx(layer.fontSize, 24);
   const fontSize = Math.max(4, Math.min(120, pxToPptxPt(fontSizePx)));
   const lineHeightPx = parseCssPx(layer.lineHeight, fontSizePx * 1.2);
   const align = ['left', 'center', 'right', 'justify'].includes(layer.textAlign) ? layer.textAlign : 'left';
   const lineSpacing = Math.max(1, pxToPptxPt(lineHeightPx));
-  slide.addText(String(layer.text), {
+  const box = expandBox(
+    rawBox,
+    Math.min(0.16, Math.max(0.015, pxToPptxX(fontSizePx * 0.24))),
+    Math.min(0.1, Math.max(0.01, pxToPptxY(fontSizePx * 0.18))),
+  );
+  const baseOptions = {
     ...box,
     margin: 0,
-    fit: 'none',
+    fit: 'shrink',
     valign: 'top',
     breakLine: false,
     color: color.color,
@@ -805,7 +833,28 @@ function addTextLayer(slide, layer) {
     wrap: Number(layer.lineCount) > 1,
     charSpacing: pxToPptxPt(parseCssPx(layer.letterSpacing, 0)),
     rotate: layer.rotate || 0,
-  });
+  };
+  const runs = Array.isArray(layer.runs)
+    ? layer.runs
+        .map((run) => {
+          const text = String(run?.text || '');
+          if (!text) return null;
+          const runColor = parseCssColor(run.color) || color;
+          const runFontSizePx = parseCssPx(run.fontSize, fontSizePx);
+          return {
+            text,
+            options: {
+              color: runColor.color,
+              fontFace: cleanFontFace(run.fontFamily || layer.fontFamily, text),
+              fontSize: Math.max(4, Math.min(120, pxToPptxPt(runFontSizePx))),
+              bold: Number(run.fontWeight ?? layer.fontWeight) >= 600,
+              italic: run.fontStyle === 'italic' || String(run.fontStyle || '').startsWith('oblique'),
+            },
+          };
+        })
+        .filter(Boolean)
+    : [];
+  slide.addText(runs.length > 1 ? runs : String(layer.text), baseOptions);
   return true;
 }
 
@@ -813,12 +862,15 @@ function addImageLayer(slide, layer, exportDir) {
   const box = layerBox(layer);
   const image = imageSourceForPptx(layer.src, exportDir);
   if (!box || !image) return false;
-  slide.addImage({
+  const fit = normalizePptxImageFit(layer);
+  const imageOptions = {
     ...image,
     ...box,
     rotate: layer.rotate || 0,
     transparency: Math.round((1 - Math.max(0, Math.min(1, Number(layer.opacity) || 1))) * 100),
-  });
+  };
+  if (fit) imageOptions.sizing = { type: fit, w: box.w, h: box.h };
+  slide.addImage(imageOptions);
   return true;
 }
 
@@ -901,18 +953,14 @@ async function captureEditablePptxPages({ exportDir, pageCount }) {
           return relativeDomRect(el.getBoundingClientRect());
         }
 
-        function directTextRect(el) {
+        function textContentRect(el) {
           const rects = [];
-          Array.from(el.childNodes).forEach((node) => {
-            if (node.nodeType !== Node.TEXT_NODE) return;
-            if (!normalizeText(node.textContent || '')) return;
-            const range = document.createRange();
-            range.selectNodeContents(node);
-            Array.from(range.getClientRects()).forEach((rect) => {
-              if (rect.width >= 1 && rect.height >= 1) rects.push(rect);
-            });
-            range.detach();
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          Array.from(range.getClientRects()).forEach((rect) => {
+            if (rect.width >= 1 && rect.height >= 1) rects.push(rect);
           });
+          range.detach();
           if (!rects.length) return null;
           const union = rects.reduce((acc, rect) => ({
             left: Math.min(acc.left, rect.left),
@@ -928,8 +976,65 @@ async function captureEditablePptxPages({ exportDir, pageCount }) {
           return { ...relativeDomRect(union), lineCount: rects.length };
         }
 
+        function textRunStyle(style) {
+          return {
+            color: style.color,
+            fontFamily: style.fontFamily,
+            fontSize: style.fontSize,
+            fontWeight: style.fontWeight,
+            fontStyle: style.fontStyle,
+          };
+        }
+
+        function sameTextRunStyle(a, b) {
+          return a.color === b.color &&
+            a.fontFamily === b.fontFamily &&
+            a.fontSize === b.fontSize &&
+            a.fontWeight === b.fontWeight &&
+            a.fontStyle === b.fontStyle;
+        }
+
+        function inlineTextRuns(el) {
+          const runs = [];
+
+          function push(text, style) {
+            const normalized = String(text || '').replace(/\\s+/g, ' ');
+            if (!normalized.trim()) return;
+            const last = runs[runs.length - 1];
+            if (last && sameTextRunStyle(last, style)) {
+              last.text += normalized;
+            } else {
+              runs.push({ text: normalized, ...style });
+            }
+          }
+
+          function visitNode(node, inheritedStyle) {
+            if (node.nodeType === Node.TEXT_NODE) {
+              push(node.textContent || '', inheritedStyle);
+              return;
+            }
+            if (!(node instanceof Element)) return;
+            if (['SCRIPT', 'STYLE', 'SVG', 'IMG'].includes(node.tagName)) return;
+            if (node.tagName === 'BR') {
+              const last = runs[runs.length - 1];
+              if (last) last.text += '\\n';
+              return;
+            }
+            const style = textRunStyle(getComputedStyle(node));
+            Array.from(node.childNodes).forEach((child) => visitNode(child, style));
+          }
+
+          const baseStyle = textRunStyle(getComputedStyle(el));
+          Array.from(el.childNodes).forEach((child) => visitNode(child, baseStyle));
+          if (runs.length) {
+            runs[0].text = runs[0].text.replace(/^\\s+/, '');
+            runs[runs.length - 1].text = runs[runs.length - 1].text.replace(/\\s+$/, '');
+          }
+          return runs.filter((run) => run.text);
+        }
+
         function textLayerRect(el, fallback) {
-          const textRect = directTextRect(el);
+          const textRect = textContentRect(el);
           if (!textRect) return fallback;
           const elementRect = relativeRect(el);
           const right = Math.max(textRect.x + textRect.w, elementRect.x + elementRect.w);
@@ -1022,6 +1127,8 @@ async function captureEditablePptxPages({ exportDir, pageCount }) {
               ...base,
               type: 'image',
               src: new URL(backgroundUrl, location.href).href,
+              backgroundSize: style.backgroundSize,
+              backgroundPosition: style.backgroundPosition,
               order: order++,
             });
           }
@@ -1030,6 +1137,8 @@ async function captureEditablePptxPages({ exportDir, pageCount }) {
               ...base,
               type: 'image',
               src: el.currentSrc || el.src || el.getAttribute('src') || '',
+              objectFit: style.objectFit,
+              objectPosition: style.objectPosition,
               order: order++,
             });
           } else if (el instanceof SVGElement && el.tagName.toLowerCase() === 'svg') {
@@ -1044,6 +1153,7 @@ async function captureEditablePptxPages({ exportDir, pageCount }) {
             const text = elementText(el);
             if (text) {
               const textRect = textLayerRect(el, base);
+              const runs = inlineTextRuns(el);
               layers.push({
                 ...(textRect ? { ...textRect, ...(motion || {}) } : base),
                 opacity,
@@ -1059,8 +1169,10 @@ async function captureEditablePptxPages({ exportDir, pageCount }) {
                 lineHeight: style.lineHeight,
                 textAlign: style.textAlign,
                 lineCount: textRect?.lineCount || 1,
+                runs,
                 order: order++,
               });
+              return;
             }
           }
           Array.from(el.children).forEach(visit);
