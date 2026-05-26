@@ -15,6 +15,7 @@ function isActive(job: IngestionJob) {
 }
 
 function jobProgress(job: IngestionJob) {
+  if (typeof job.progress === "number") return Math.max(0, Math.min(100, job.progress));
   if (job.status === "queued") return 18;
   if (job.status === "running") return 62;
   if (job.status === "completed") return 100;
@@ -47,6 +48,8 @@ function sourceLabel(job: IngestionJob) {
 
 function friendlyJobError(error?: string) {
   if (!error) return "导入任务失败，请稍后重试。";
+  const botChallengeLike = /bot-protection|403 challenge|cf-mitigated|cloudflare|just a moment|enable javascript and cookies/i.test(error);
+  if (botChallengeLike) return "目标网站启用了反爬或访问挑战，当前公开 URL 导入无法稳定抓取。可以换最终落地页、社区/本地包，或后续使用登录浏览器捕获。";
   const modelSynthesisLike = /AI model synthesis is required|Model synthesis failed|Style card generation failed/i.test(error);
   if (modelSynthesisLike) return `模型抽象失败：${error}`;
   const quotaLike = /HTTP 429|quota|usage limit|rate limit|Monthly usage limit/i.test(error);
@@ -56,6 +59,24 @@ function friendlyJobError(error?: string) {
   const networkLike = /fetch failed|network request failed|ENOTFOUND|ECONNRESET|ETIMEDOUT|ECONNREFUSED|AbortError|TLS|certificate/i.test(error);
   if (networkLike) return "模型端点或来源连接失败，请检查网络、代理/VPN、DNS/TLS 和服务商状态。";
   return error;
+}
+
+function elapsedJobLabel(job: IngestionJob) {
+  const startedAt = Date.parse(job.createdAt);
+  if (!Number.isFinite(startedAt)) return null;
+  const seconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes < 60) return rest ? `${minutes}m ${rest}s` : `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours}h ${minutes % 60}m`;
+}
+
+function activeJobMessage(job: IngestionJob) {
+  const elapsed = elapsedJobLabel(job);
+  const stage = job.stageLabel || (job.status === "queued" ? "等待后台处理" : "后台处理中");
+  return `${stage}${elapsed ? ` · 已运行 ${elapsed}` : ""}`;
 }
 
 function modelDiagnosticSummary(job: IngestionJob) {
@@ -228,7 +249,7 @@ export function ImportQueue() {
                       ) : (
                         <div className="mt-2 flex items-center gap-1 text-xs text-muted">
                           <Clock3 size={12} aria-hidden="true" />
-                          {active ? "可继续添加其他来源，当前任务会在后台处理。" : "任务已结束。"}
+                          {active ? activeJobMessage(job) : "任务已结束。"}
                         </div>
                       )}
                     </article>

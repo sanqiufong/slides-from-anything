@@ -16,6 +16,7 @@ function resolveDataRoot() {
 export const DATA_ROOT = resolveDataRoot();
 export const DESIGNS_ROOT = path.join(DATA_ROOT, "designs");
 export const JOBS_ROOT = path.join(DATA_ROOT, "jobs");
+export const JOB_LOGS_ROOT = path.join(JOBS_ROOT, "logs");
 export const ROUTER_SKILL_ROOT = path.join(DATA_ROOT, "router-skill");
 export const DESIGN_ARCHIVE_ROOT = path.join(DATA_ROOT, "design-archives");
 export const PUBLISHED_ROOT = path.join(DATA_ROOT, "published");
@@ -24,6 +25,7 @@ export const FAVORITES_PATH = path.join(DATA_ROOT, "favorites.json");
 export async function ensureDataRoots() {
   await mkdir(DESIGNS_ROOT, { recursive: true });
   await mkdir(JOBS_ROOT, { recursive: true });
+  await mkdir(JOB_LOGS_ROOT, { recursive: true });
   await mkdir(DESIGN_ARCHIVE_ROOT, { recursive: true });
   await mkdir(PUBLISHED_ROOT, { recursive: true });
 }
@@ -172,6 +174,10 @@ export function routerRegistryPath() {
 
 export function jobPath(jobId: string) {
   return path.join(JOBS_ROOT, `${jobId}.json`);
+}
+
+export function jobLogPath(jobId: string) {
+  return path.join(JOB_LOGS_ROOT, `${jobId}.log`);
 }
 
 export async function writeJson(filePath: string, value: unknown) {

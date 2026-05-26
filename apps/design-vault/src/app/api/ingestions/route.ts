@@ -1,9 +1,11 @@
 import { spawn } from "node:child_process";
+import { closeSync, openSync } from "node:fs";
 
 import { NextResponse } from "next/server";
 
 import { classifyCanvaUrl } from "@/lib/canva-ingestion";
-import { ensureDataRoots, saveJob } from "@/lib/storage";
+import { updateJobProgress } from "@/lib/job-progress";
+import { ensureDataRoots, getJob, jobLogPath, saveJob } from "@/lib/storage";
 import type { IngestionJob, IngestMode } from "@/lib/types";
 
 function validMode(input: string): input is IngestMode {
@@ -84,16 +86,60 @@ export async function POST(request: Request) {
   }
 
   const now = new Date().toISOString();
-  const job: IngestionJob = { id: `job_${Date.now()}`, url, mode, status: "queued", createdAt: now, updatedAt: now };
+  const jobId = `job_${Date.now()}`;
+  const logPath = jobLogPath(jobId);
+  const job: IngestionJob = {
+    id: jobId,
+    url,
+    mode,
+    status: "queued",
+    stage: "queued",
+    stageLabel: "等待后台导入 worker 启动",
+    progress: 8,
+    createdAt: now,
+    updatedAt: now,
+    lastHeartbeatAt: now,
+    workerLogPath: `jobs/logs/${jobId}.log`,
+  };
   await saveJob(job);
 
-  const child = spawn(process.execPath, ["--import", "tsx", "./scripts/run-ingest.ts", job.id], {
-    cwd: process.cwd(),
-    env: process.env,
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
+  let logFd: number | null = null;
+  try {
+    logFd = openSync(logPath, "a");
+    const child = spawn(process.execPath, ["--import", "tsx", "./scripts/run-ingest.ts", job.id], {
+      cwd: process.cwd(),
+      env: process.env,
+      detached: true,
+      stdio: ["ignore", logFd, logFd],
+    });
+
+    child.once("error", (error) => {
+      void updateJobProgress(job, {
+        status: "failed",
+        stage: "failed",
+        stageLabel: "后台导入 worker 启动失败",
+        progress: 100,
+        error: error.message,
+      });
+    });
+    child.once("exit", (code, signal) => {
+      if (code === 0) return;
+      void (async () => {
+        const current = await getJob(job.id);
+        if (!current || current.status === "completed" || current.status === "failed") return;
+        await updateJobProgress(current, {
+          status: "failed",
+          stage: "failed",
+          stageLabel: "后台导入 worker 异常退出",
+          progress: 100,
+          error: `Ingestion worker exited before finishing${typeof code === "number" ? ` (code ${code})` : ""}${signal ? ` (signal ${signal})` : ""}.`,
+        });
+      })();
+    });
+    child.unref();
+  } finally {
+    if (logFd !== null) closeSync(logFd);
+  }
 
   return NextResponse.json({
     ...job,

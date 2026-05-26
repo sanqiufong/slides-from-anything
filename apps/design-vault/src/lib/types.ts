@@ -659,8 +659,23 @@ export type IngestionJob = {
   status: "queued" | "running" | "completed" | "failed";
   createdAt: string;
   updatedAt: string;
+  stage?:
+    | "queued"
+    | "fetching-source"
+    | "resolving-source"
+    | "capturing-visuals"
+    | "collecting-assets"
+    | "synthesizing-profile"
+    | "rendering-previews"
+    | "writing-output"
+    | "completed"
+    | "failed";
+  stageLabel?: string;
+  progress?: number;
+  lastHeartbeatAt?: string;
   slug?: string;
   targetSlug?: string;
+  workerLogPath?: string;
   error?: string;
   diagnostics?: {
     modelRequest?: ModelRequestDiagnostics;

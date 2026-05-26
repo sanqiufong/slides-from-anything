@@ -2045,7 +2045,15 @@ export async function runProjectIngestion(jobId: string) {
   const job = await getJob(jobId);
   if (!job) throw new Error(`Job not found: ${jobId}`);
   ensureProjectJob(job);
-  const running = { ...job, status: "running" as const, updatedAt: new Date().toISOString() };
+  const running = {
+    ...job,
+    status: "running" as const,
+    stage: "fetching-source" as const,
+    stageLabel: "正在下载并解析项目资料",
+    progress: 20,
+    updatedAt: new Date().toISOString(),
+    lastHeartbeatAt: new Date().toISOString(),
+  };
   await saveJob(running);
 
   let materialized: MaterializedSource | null = null;
@@ -2135,10 +2143,14 @@ export async function runProjectIngestion(jobId: string) {
       await saveJob({
         ...running,
         status: "completed",
+        stage: "completed",
+        stageLabel: "导入完成",
+        progress: 100,
         slug: siblings[0]?.slug ?? slug,
         error: undefined,
         diagnostics: undefined,
         updatedAt: new Date().toISOString(),
+        lastHeartbeatAt: new Date().toISOString(),
       });
       return;
     }
@@ -2266,15 +2278,30 @@ export async function runProjectIngestion(jobId: string) {
     await writeRouterSkill(meta);
     await writeJson(designMetaPath(slug), meta);
 
-    await saveJob({ ...running, status: "completed", slug, error: undefined, diagnostics: undefined, updatedAt: new Date().toISOString() });
+    await saveJob({
+      ...running,
+      status: "completed",
+      stage: "completed",
+      stageLabel: "导入完成",
+      progress: 100,
+      slug,
+      error: undefined,
+      diagnostics: undefined,
+      updatedAt: new Date().toISOString(),
+      lastHeartbeatAt: new Date().toISOString(),
+    });
   } catch (error) {
     const modelRequest = getModelRequestDiagnostics(error);
     await saveJob({
       ...running,
       status: "failed",
+      stage: "failed",
+      stageLabel: "导入失败",
+      progress: 100,
       error: error instanceof Error ? error.message : String(error),
       diagnostics: modelRequest ? { modelRequest } : running.diagnostics,
       updatedAt: new Date().toISOString(),
+      lastHeartbeatAt: new Date().toISOString(),
     });
     throw error;
   } finally {

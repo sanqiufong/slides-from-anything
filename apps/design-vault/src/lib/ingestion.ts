@@ -8,6 +8,7 @@ import * as cheerio from "cheerio";
 import { generatePptDeckPreview, generateStyleCardPreview } from "./card-preview";
 import { buildDesignMd, buildOpenSlideTheme } from "./design-md";
 import { withExecutionProtocolPaths, writeExecutionProtocol, writeRouterSkill } from "./execution-protocol";
+import { updateJobProgress } from "./job-progress";
 import { getModelRequestDiagnostics } from "./model-request";
 import { renderPptPreview, renderWebPreview } from "./preview";
 import { evaluateDesignQuality } from "./quality";
@@ -1918,8 +1919,12 @@ export async function runIngestion(jobId: string) {
   await ensureDataRoots();
   const job = await getJob(jobId);
   if (!job) throw new Error(`Job not found: ${jobId}`);
-  const running = { ...job, status: "running" as const, updatedAt: new Date().toISOString() };
-  await saveJob(running);
+  await updateJobProgress(job, {
+    status: "running",
+    stage: "fetching-source",
+    stageLabel: "正在抓取网页源代码",
+    progress: 14,
+  });
 
   try {
     const requestedUrl = new URL(job.url);
@@ -1927,6 +1932,11 @@ export async function runIngestion(jobId: string) {
       throw new Error(`Shortened URLs are not stable source material for design extraction: ${requestedUrl.toString()} Paste the final destination URL instead.`);
     }
     const requestedHtml = await fetchTextWithFallback(requestedUrl.toString());
+    await updateJobProgress(job, {
+      stage: "resolving-source",
+      stageLabel: "正在解析真实来源和页面结构",
+      progress: 24,
+    });
     const resolved = await resolvePrimarySource(requestedUrl, requestedHtml);
     const { pageUrl, html, $, sourceChain } = resolved;
     const pageTitle = getPageTitle($, pageUrl);
@@ -1937,10 +1947,20 @@ export async function runIngestion(jobId: string) {
     const cssBundle = await fetchCssBundle($, pageUrl);
     const styleCorpus = `${html}\n${cssBundle}`;
     const hexMatches = [...styleCorpus.matchAll(/#(?:[0-9a-fA-F]{3,8})\b/g)].map((match) => match[0]);
+    await updateJobProgress(job, {
+      stage: "capturing-visuals",
+      stageLabel: "正在用浏览器捕获页面视觉证据",
+      progress: 38,
+    });
     const visualCrossCheck = await captureRenderedVisualJourney(pageUrl, slug);
     const renderedHexMatches = visualColorHexMatches(visualCrossCheck);
     const combinedHexMatches = [...hexMatches, ...renderedHexMatches];
     const tokens = buildTokens(combinedHexMatches, cssBundle);
+    await updateJobProgress(job, {
+      stage: "collecting-assets",
+      stageLabel: "正在整理图片、字体和交互线索",
+      progress: 50,
+    });
     const sourceAssets = await collectAssets($, slug, pageUrl, cssBundle);
     const assets = [...visualJourneyAssets(visualCrossCheck, pageUrl), ...sourceAssets];
     const colorCandidates = mergeRenderedColorCandidates(collectColorCandidates(hexMatches), visualCrossCheck);
@@ -1958,6 +1978,11 @@ export async function runIngestion(jobId: string) {
     evidence.easingCandidates = easingCandidates;
     evidence.fontSizeRatio = fontSizeRatio;
     evidence.roleEvidence = buildCssRoleEvidence(tokens, cssBundle);
+    await updateJobProgress(job, {
+      stage: "synthesizing-profile",
+      stageLabel: "正在生成设计系统抽象",
+      progress: 64,
+    });
     const baseProfile = await synthesizeDesignProfile(evidence, tokens, { mediaBaseDir: designDir(slug) });
     const enrichedEvidence: DesignEvidence = {
       ...evidence,
@@ -2002,9 +2027,19 @@ export async function runIngestion(jobId: string) {
     });
     const profile: DesignSystemProfile = { ...baseProfile, quality };
     const meta: DesignMeta = withExecutionProtocolPaths({ ...baseMeta, profile });
+    await updateJobProgress(job, {
+      stage: "rendering-previews",
+      stageLabel: "正在生成卡片预览和 PPT 预览",
+      progress: 82,
+    });
     const cardPreview = await generateStyleCardPreview(meta);
     const pptDeckPreview = await generatePptDeckPreview(meta);
 
+    await updateJobProgress(job, {
+      stage: "writing-output",
+      stageLabel: "正在写入资料库文件",
+      progress: 94,
+    });
     await writeText(designDocPath(slug), buildDesignMd(profile, pageUrl.hostname, job.mode, enrichedEvidence));
     await writeText(openSlideThemePath(slug), buildOpenSlideTheme(profile));
     await writeJson(tokensPath(slug), tokens);
@@ -2026,15 +2061,28 @@ export async function runIngestion(jobId: string) {
     await writeRouterSkill(meta);
     await writeJson(designMetaPath(slug), meta);
 
-    await saveJob({ ...running, status: "completed", slug, error: undefined, diagnostics: undefined, updatedAt: new Date().toISOString() });
+    await updateJobProgress(job, {
+      status: "completed",
+      stage: "completed",
+      stageLabel: "导入完成",
+      progress: 100,
+      slug,
+      error: undefined,
+      diagnostics: undefined,
+    });
   } catch (error) {
     const modelRequest = getModelRequestDiagnostics(error);
+    const current = await getJob(job.id);
     await saveJob({
-      ...running,
+      ...(current ?? job),
       status: "failed",
+      stage: "failed",
+      stageLabel: "导入失败",
+      progress: 100,
       error: error instanceof Error ? error.message : String(error),
-      diagnostics: modelRequest ? { modelRequest } : running.diagnostics,
+      diagnostics: modelRequest ? { modelRequest } : current?.diagnostics ?? job.diagnostics,
       updatedAt: new Date().toISOString(),
+      lastHeartbeatAt: new Date().toISOString(),
     });
     throw error;
   }
