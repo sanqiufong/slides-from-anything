@@ -156,10 +156,22 @@ async function evaluateOpenPptDeck({ source, slideDir }) {
 function formatTokenStylesheet(stylesheet) {
   const value = String(stylesheet || '').trim();
   if (!/^<style\b/i.test(value) || !/<\/style>\s*$/i.test(value)) return '';
-  return value
-    .split('\n')
-    .map((line) => `  ${line}`)
-    .join('\n');
+  const css = decodeStyleTextEntities(value.replace(/^<style\b[^>]*>/i, '').replace(/<\/style>\s*$/i, ''));
+  const declarations = [];
+  for (const block of css.matchAll(/:root\s*\{([\s\S]*?)\}/gi)) {
+    for (const declaration of block[1].matchAll(/--[a-z0-9_-]+\s*:\s*[^;{}]+;/gi)) {
+      declarations.push(declaration[0].trim());
+    }
+  }
+  if (declarations.length === 0) return '';
+  const uniqueDeclarations = [...new Set(declarations)];
+  return [
+    '  <style data-openppt-vault-tokens>',
+    '    :root {',
+    ...uniqueDeclarations.map((line) => `      ${line}`),
+    '    }',
+    '  </style>',
+  ].join('\n');
 }
 
 function renderStandaloneHtml({ title, design, pages, tokenStylesheet }) {
