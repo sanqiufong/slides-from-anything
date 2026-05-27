@@ -96,6 +96,12 @@ SFA 把字号、层级、段落密度、图片裁切、对齐关系和 block 位
 
 ## 环境要求
 
+如果使用便携发布包，用户不需要安装 Node.js、Corepack 或 pnpm。解压后双击
+`start.command` 即可，发布包会使用自带的 `runtime/node` 和已经打包好的
+`node_modules`。
+
+如果从源码仓库运行，需要：
+
 - Node.js `24.x`
 - Corepack
 - 通过 Corepack 使用 pnpm `10.33.2`
@@ -106,12 +112,32 @@ corepack enable
 pnpm install
 ```
 
+## 构建便携发布包
+
+维护者可以生成给非开发用户使用的自带环境包：
+
+```bash
+pnpm tools-pack integrated build
+```
+
+产物会写入：
+
+```text
+releases/integrated/Slides-from-Anything-portable
+releases/integrated/Slides-from-Anything-portable.zip
+```
+
+这个包会携带 Node 24 runtime、当前 workspace 依赖和双击启动入口；启动时会跳过
+`pnpm install`，不依赖用户机器上的全局 Node/pnpm。
+
 ## 快速启动
 
 在 macOS 上，最简单的方式是使用集成启动器：
 
 ```bash
 ./start.command
+# 或
+./启动集成项目.command
 ```
 
 如果只想在终端里启动：

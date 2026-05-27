@@ -13,7 +13,7 @@ Initial open-source integration release.
 ### Added
 
 - Integrated the real OpenPPT/SFA web runtime with the real Design Vault UI.
-- Added `scripts/start-integrated.sh` and `启动集成项目.command` to launch both
+- Added `scripts/start-integrated.sh` and `start.command` to launch both
   applications together.
 - Added isolated Design Vault runtime data under
   `.tmp/integrated/design-vault-data`.

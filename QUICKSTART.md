@@ -7,6 +7,12 @@ runtime plus the embedded Design Vault application.
 
 ## Requirements
 
+For the portable release package, there are no Node.js, Corepack, or pnpm
+requirements. Double-click `start.command`; the package uses its bundled Node
+runtime and bundled workspace dependencies.
+
+For a source checkout:
+
 - Node.js `24.x`
 - Corepack
 - pnpm `10.33.2` selected through Corepack
@@ -20,11 +26,31 @@ pnpm install
 
 The expected pnpm version is `10.33.2`.
 
+## Build A Portable Package
+
+Maintainers can create a self-contained package for non-developer users:
+
+```bash
+pnpm tools-pack integrated build
+```
+
+The package is written to:
+
+```text
+releases/integrated/Slides-from-Anything-portable
+releases/integrated/Slides-from-Anything-portable.zip
+```
+
+That package carries `runtime/node` and `node_modules`, marks itself with
+`.sfa-release`, and skips `pnpm install` at launch.
+
 ## Start Everything
 
 On macOS:
 
 ```bash
+./start.command
+# or
 ./启动集成项目.command
 ```
 

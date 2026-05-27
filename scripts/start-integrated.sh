@@ -4,6 +4,11 @@ set -Eeuo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+BUNDLED_NODE_DIR="$ROOT_DIR/runtime/node/bin"
+if [ -x "$BUNDLED_NODE_DIR/node" ]; then
+  export PATH="$BUNDLED_NODE_DIR:$PATH"
+fi
+
 shopt -s nullglob
 for candidate in \
   "$HOME"/.nvm/versions/node/v24*/bin \
@@ -16,7 +21,15 @@ do
 done
 
 export PATH="$HOME/.local/bin:$HOME/Library/pnpm:$PATH:/opt/homebrew/bin:/usr/local/bin"
+if [ -x "$BUNDLED_NODE_DIR/node" ]; then
+  export PATH="$BUNDLED_NODE_DIR:$PATH"
+fi
 export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+SFA_RELEASE_MODE="${SFA_RELEASE_MODE:-0}"
+if [ -f "$ROOT_DIR/.sfa-release" ]; then
+  SFA_RELEASE_MODE=1
+fi
+NODE_BIN="node"
 
 OPENPPT_WEB_PORT="${OPENPPT_WEB_PORT:-5173}"
 OPENPPT_DAEMON_PORT="${OPENPPT_DAEMON_PORT:-17456}"
@@ -41,6 +54,24 @@ require_cmd() {
     printf 'Missing required command: %s\n' "$1" >&2
     exit 1
   fi
+}
+
+run_tools_dev() {
+  local entry="$ROOT_DIR/tools/dev/bin/tools-dev.mjs"
+  if [ "$SFA_RELEASE_MODE" = "1" ] && [ -f "$entry" ]; then
+    "${NODE_BIN:-node}" "$entry" "$@"
+    return
+  fi
+  pnpm tools-dev "$@"
+}
+
+start_design_vault() {
+  local next_entry="$ROOT_DIR/apps/design-vault/node_modules/next/dist/bin/next"
+  if [ "$SFA_RELEASE_MODE" = "1" ] && [ -f "$next_entry" ]; then
+    (cd "$ROOT_DIR/apps/design-vault" && "${NODE_BIN:-node}" "$next_entry" dev --port "$DESIGN_VAULT_PORT")
+    return
+  fi
+  pnpm --filter design-vault exec next dev --port "$DESIGN_VAULT_PORT"
 }
 
 port_pids() {
@@ -86,7 +117,7 @@ cleanup() {
   local code=$?
   trap - EXIT INT TERM
   log "Stopping services..."
-  pnpm tools-dev stop web --namespace "$OPENPPT_NAMESPACE" >/dev/null 2>&1 || true
+  run_tools_dev stop web --namespace "$OPENPPT_NAMESPACE" >/dev/null 2>&1 || true
   if [ -n "${DESIGN_VAULT_PID:-}" ]; then
     kill "$DESIGN_VAULT_PID" >/dev/null 2>&1 || true
   fi
@@ -101,17 +132,24 @@ if [ "$NODE_MAJOR" != "24" ]; then
   printf 'Install Node 24 or make it active, then run this launcher again.\n' >&2
   exit 1
 fi
-if command -v corepack >/dev/null 2>&1; then
+NODE_BIN="$(command -v node)"
+if [ "$SFA_RELEASE_MODE" != "1" ] && command -v corepack >/dev/null 2>&1; then
   corepack enable >/dev/null 2>&1 || true
 fi
-require_cmd pnpm
 require_cmd curl
+if [ "$SFA_RELEASE_MODE" != "1" ]; then
+  require_cmd pnpm
+fi
 
-log "Installing workspace dependencies..."
-pnpm install
+if [ "$SFA_RELEASE_MODE" = "1" ]; then
+  log "Using bundled Node and workspace dependencies; skipping pnpm install."
+else
+  log "Installing workspace dependencies..."
+  pnpm install
+fi
 
 log "Cleaning old local listeners..."
-pnpm tools-dev stop web --namespace "$OPENPPT_NAMESPACE" >/dev/null 2>&1 || true
+run_tools_dev stop web --namespace "$OPENPPT_NAMESPACE" >/dev/null 2>&1 || true
 kill_port "$DESIGN_VAULT_PORT" "Design Vault"
 kill_port "$OPENPPT_WEB_PORT" "OpenPPT web"
 kill_port "$OPENPPT_DAEMON_PORT" "OpenPPT daemon"
@@ -122,7 +160,7 @@ export DESIGN_VAULT_DATA_DIR
 mkdir -p "$DESIGN_VAULT_DATA_DIR/designs" "$DESIGN_VAULT_DATA_DIR/jobs"
 
 log "Starting real Design Vault UI..."
-pnpm --filter design-vault exec next dev --port "$DESIGN_VAULT_PORT" >"$DESIGN_VAULT_LOG" 2>&1 &
+start_design_vault >"$DESIGN_VAULT_LOG" 2>&1 &
 DESIGN_VAULT_PID=$!
 echo "$DESIGN_VAULT_PID" > "$LOG_DIR/design-vault.pid"
 wait_for_url "${DESIGN_VAULT_URL}/api/health" "Design Vault" 120 || {
@@ -135,7 +173,7 @@ export DESIGN_VAULT_ORIGIN="$DESIGN_VAULT_URL"
 export OPENPPT_VAULT_DESIGNS_DIR="$DESIGN_VAULT_DATA_DIR/designs"
 
 log "Starting real OpenPPT web UI and daemon..."
-pnpm tools-dev start web \
+run_tools_dev start web \
   --namespace "$OPENPPT_NAMESPACE" \
   --daemon-port "$OPENPPT_DAEMON_PORT" \
   --web-port "$OPENPPT_WEB_PORT" >"$TOOLS_DEV_LOG" 2>&1 || {
@@ -145,7 +183,7 @@ pnpm tools-dev start web \
 
 wait_for_url "$OPENPPT_URL" "OpenPPT" 120 || {
   cat "$TOOLS_DEV_LOG" >&2 || true
-  pnpm tools-dev logs --namespace "$OPENPPT_NAMESPACE" --json >&2 || true
+  run_tools_dev logs --namespace "$OPENPPT_NAMESPACE" --json >&2 || true
   exit 1
 }
 

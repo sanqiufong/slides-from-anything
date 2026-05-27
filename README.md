@@ -119,6 +119,12 @@ find the project.
 
 ## Requirements
 
+If you are using the portable release package, you do not need to install
+Node.js, Corepack, or pnpm. Unzip it and double-click `start.command`; the
+package uses its bundled `runtime/node` and bundled `node_modules`.
+
+For a source checkout:
+
 - Node.js `24.x`
 - Corepack
 - pnpm `10.33.2` through Corepack
@@ -128,6 +134,25 @@ find the project.
 corepack enable
 pnpm install
 ```
+
+## Build A Portable Package
+
+Maintainers can build a self-contained package for non-developer users:
+
+```bash
+pnpm tools-pack integrated build
+```
+
+Artifacts are written to:
+
+```text
+releases/integrated/Slides-from-Anything-portable
+releases/integrated/Slides-from-Anything-portable.zip
+```
+
+The package carries Node 24, the current workspace dependencies, and the
+double-click launcher. Launch skips `pnpm install` and does not depend on the
+user's global Node/pnpm setup.
 
 ## Quick Start
 

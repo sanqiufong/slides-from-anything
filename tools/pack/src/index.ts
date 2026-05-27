@@ -32,6 +32,7 @@ import {
   stopPackedLinuxApp,
   uninstallPackedLinuxApp,
 } from "./linux.js";
+import { packIntegratedRelease } from "./integrated.js";
 
 type CliOptions = ToolPackCliOptions;
 
@@ -93,6 +94,18 @@ function addWinLifecycleOptions(command: CacCommand) {
 }
 
 const cli = cac("tools-pack");
+
+addSharedOptions(cli.command("integrated <action>", "Integrated portable release commands: build")).action(
+  async (action: string, options: CliOptions) => {
+    switch (action) {
+      case "build":
+        printJson(await packIntegratedRelease(options));
+        return;
+      default:
+        throw new Error(`unsupported integrated action: ${action}`);
+    }
+  },
+);
 
 addMacBuildOptions(addSharedOptions(cli.command("mac <action>", "Mac packaging commands: build|install|start|stop|logs|uninstall|cleanup"))).action(
   async (action: string, options: CliOptions) => {

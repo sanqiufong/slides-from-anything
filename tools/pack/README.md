@@ -4,6 +4,7 @@ Local packaging control plane for Slides from Anything.
 
 The active slice is mac-first local packaging and smoke lifecycle control:
 
+- `tools-pack integrated build` for a portable, double-clickable integrated release folder/zip with bundled Node and dependencies
 - `tools-pack mac build --to all`
 - `tools-pack mac build --to app|dmg|zip`
 - `tools-pack mac build --to all --signed`
@@ -58,6 +59,20 @@ placeholder so future design-provided assets can replace the resource files with
 Local developer artifacts bake the tools-pack namespace runtime root so `tools-pack mac start/stop/logs/cleanup` can manage
 them from the repo. Release artifacts use `--portable` so the installed app resolves namespace data/log/runtime/user-data
 from the user's Electron `userData` root instead of the build machine's `.tmp` path.
+
+## Integrated Portable Release
+
+`tools-pack integrated build` creates a source-tree-style portable package under
+`releases/integrated/Slides-from-Anything-portable` plus a zip next to it. This
+is for non-developer handoff: the folder includes the current Node 24 runtime
+under `runtime/node`, the current workspace `node_modules`, and a release marker
+that makes `scripts/start-integrated.sh` skip `pnpm install`.
+
+The integrated launcher intentionally calls Node entrypoints directly in release
+mode instead of pnpm-generated `.bin` wrappers. pnpm wrapper scripts bake
+absolute `NODE_PATH` entries from the build checkout, which would make the
+unzipped package accidentally depend on the maintainer machine. Direct Node
+entrypoints keep the package relocatable.
 
 ## Linux
 

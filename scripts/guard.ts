@@ -31,6 +31,7 @@ const residualSkippedDirectories = new Set([
   "dist",
   "node_modules",
   "out",
+  "releases",
 ]);
 
 const residualAllowedExactPaths = new Set([

@@ -34,7 +34,7 @@ decks from source material through the real product UI.
 
 ### F1. Start The Integrated App
 
-The user runs `./启动集成项目.command` or
+The user runs `./start.command` or
 `./scripts/start-integrated.sh`. The launcher:
 
 - installs workspace dependencies,
