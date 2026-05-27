@@ -12116,6 +12116,12 @@ img.vault-template-preview-media {
   transform: translateY(-1px);
 }
 
+.qf-vault-browse-card-empty {
+  border-style: solid;
+  border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-panel));
+}
+
 .qf-vault-browse-icon {
   flex: 0 0 auto;
   width: 30px;
@@ -12161,6 +12167,12 @@ img.vault-template-preview-media {
   display: flex;
   align-items: baseline;
   gap: 6px;
+}
+
+.qf-vault-browse-card-empty .qf-vault-browse-body {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
 }
 
 .qf-vault-browse-body strong {
@@ -12422,6 +12434,43 @@ img.vault-template-preview-media {
   font-size: 13px;
   text-align: center;
   padding: 24px;
+}
+
+.qf-vault-modal-empty-action {
+  gap: 10px;
+  align-content: center;
+}
+
+.qf-vault-empty-title {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.qf-vault-empty-body {
+  max-width: 440px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.qf-vault-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.qf-vault-empty-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.qf-vault-empty-message {
+  color: var(--text-faint);
+  font-size: 11px;
 }
 
 /* ─── qf vault picker v2 (compact rows + filters + master-detail) ─── */

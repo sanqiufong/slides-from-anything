@@ -183,9 +183,13 @@ const mockVaultDesigns = vi.hoisted<VaultDesignMeta[]>(() => [
   },
 ]);
 
-vi.mock('../../src/providers/registry', () => ({
-  fetchVaultDesigns: vi.fn(async () => mockVaultDesigns),
+const registryMocks = vi.hoisted(() => ({
+  fetchVaultDesigns: vi.fn(),
+  fetchVaultDiscovery: vi.fn(),
+  syncVaultDesignSystems: vi.fn(),
 }));
+
+vi.mock('../../src/providers/registry', () => registryMocks);
 
 describe('QuestionFormView Vault template picker', () => {
   let host: HTMLDivElement;
@@ -195,6 +199,19 @@ describe('QuestionFormView Vault template picker', () => {
     host = document.createElement('div');
     document.body.appendChild(host);
     root = createRoot(host);
+    registryMocks.fetchVaultDesigns.mockReset();
+    registryMocks.fetchVaultDesigns.mockResolvedValue(mockVaultDesigns);
+    registryMocks.fetchVaultDiscovery.mockReset();
+    registryMocks.fetchVaultDiscovery.mockResolvedValue(null);
+    registryMocks.syncVaultDesignSystems.mockReset();
+    registryMocks.syncVaultDesignSystems.mockResolvedValue({
+      total: 0,
+      synced: 0,
+      imported: 0,
+      refreshed: 0,
+      failed: 0,
+      errors: [],
+    });
   });
 
   afterEach(() => {
@@ -306,6 +323,70 @@ describe('QuestionFormView Vault template picker', () => {
       'Image generation model',
     );
     expect(document.querySelector('.qf-vault-browse-card')).toBeTruthy();
+  });
+
+  it('offers Design Vault install and refresh actions when the local Vault library is empty', async () => {
+    registryMocks.fetchVaultDesigns
+      .mockResolvedValueOnce([])
+      .mockResolvedValueOnce([mockVaultDesigns[0]!]);
+    registryMocks.syncVaultDesignSystems.mockResolvedValueOnce({
+      total: 1,
+      synced: 1,
+      imported: 1,
+      refreshed: 0,
+      failed: 0,
+      errors: [],
+    });
+    const form: QuestionForm = {
+      id: 'vault-template',
+      title: 'Choose a style template',
+      questions: [
+        {
+          id: 'template',
+          label: 'Recommended template',
+          type: 'radio',
+          required: true,
+          options: [],
+        },
+      ],
+    };
+
+    await act(async () => {
+      root.render(
+        <QuestionFormView
+          form={form}
+          interactive
+          onSubmit={() => undefined}
+        />,
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const installBrowseButton = findButton('Install from Design Vault');
+    expect(installBrowseButton).toBeTruthy();
+    expect(installBrowseButton?.textContent).toContain('Pick a template there, then refresh here.');
+
+    await act(async () => {
+      installBrowseButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    });
+
+    expect(document.querySelector('.qf-vault-modal-empty-action')?.textContent).toContain(
+      'No local Vault templates yet',
+    );
+    const refreshButton = findButton('Refresh from Vault');
+    expect(refreshButton).toBeTruthy();
+
+    await act(async () => {
+      refreshButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(registryMocks.syncVaultDesignSystems).toHaveBeenCalledTimes(1);
+    expect(document.querySelector('.qf-vault-modal-row')?.textContent).toContain(
+      'Black And Gray Minimalist Creative Portfolio Presentation',
+    );
   });
 
   it('renders slug-only style recommendations as Vault preview cards', async () => {

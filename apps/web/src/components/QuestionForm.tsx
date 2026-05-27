@@ -3,8 +3,14 @@ import { createPortal } from 'react-dom';
 import { useT } from '../i18n';
 import type { DirectionCard, QuestionForm } from '../artifacts/question-form';
 import { formatFormAnswers } from '../artifacts/question-form';
-import { fetchVaultDesigns } from '../providers/registry';
+import {
+  fetchVaultDesigns,
+  fetchVaultDiscovery,
+  syncVaultDesignSystems,
+} from '../providers/registry';
 import type { VaultDesignMeta } from '../types';
+import { buildVaultDeepLinkUrl } from '../utils/vaultDeepLink';
+import { DesignVaultInstallGate } from './DesignVaultInstallGate';
 import { Icon } from './Icon';
 import { VaultPreviewFrame } from './VaultPreviewFrame';
 
@@ -36,9 +42,12 @@ export function QuestionFormView({
   const [answers, setAnswers] = useState<Record<string, string | string[]>>(initial);
   const [vaultDesigns, setVaultDesigns] = useState<VaultDesignMeta[]>([]);
   const [vaultLoading, setVaultLoading] = useState(false);
+  const [vaultRefreshing, setVaultRefreshing] = useState(false);
+  const [vaultRefreshMessage, setVaultRefreshMessage] = useState<string | null>(null);
   const [vaultLoadError, setVaultLoadError] = useState<string | null>(null);
   const [vaultPickerQuestionId, setVaultPickerQuestionId] = useState<string | null>(null);
   const [vaultPickerSearch, setVaultPickerSearch] = useState('');
+  const [vaultInstallGateOpen, setVaultInstallGateOpen] = useState(false);
   const hasVaultTemplateQuestion = useMemo(
     () => form.questions.some((q) => isVaultTemplateQuestion(form, q)),
     [form],
@@ -89,6 +98,35 @@ export function QuestionFormView({
     setVaultPickerQuestionId(null);
     setVaultPickerSearch('');
     void onVaultTemplateSelect?.(design);
+  }
+
+  async function refreshVaultTemplatesFromVault() {
+    if (vaultRefreshing) return;
+    setVaultRefreshing(true);
+    setVaultLoadError(null);
+    setVaultRefreshMessage(null);
+    try {
+      await syncVaultDesignSystems();
+      const designs = await fetchVaultDesigns();
+      setVaultDesigns(designs);
+      setVaultRefreshMessage(t('qf.vaultInstallRefreshDone', { count: designs.length }));
+    } catch (error) {
+      setVaultLoadError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setVaultRefreshing(false);
+    }
+  }
+
+  async function openDesignVaultForInstall() {
+    if (typeof window === 'undefined') return;
+    const next = await fetchVaultDiscovery();
+    if (next?.state === 'running') {
+      window.location.href = buildVaultDeepLinkUrl(next.baseUrl, window.location.href);
+      return;
+    }
+    setVaultPickerQuestionId(null);
+    setVaultPickerSearch('');
+    setVaultInstallGateOpen(true);
   }
 
   function toggleCheckbox(id: string, option: string, maxSelections?: number) {
@@ -400,9 +438,24 @@ export function QuestionFormView({
           activeVaultTemplateSlug={locked ? null : activeVaultTemplateSlug}
           onSearch={setVaultPickerSearch}
           onSelect={(design) => selectVaultDesign(activeVaultPickerQuestion.id, design)}
+          refreshing={vaultRefreshing}
+          refreshMessage={vaultRefreshMessage}
+          onRefreshFromVault={() => void refreshVaultTemplatesFromVault()}
+          onOpenDesignVault={() => void openDesignVaultForInstall()}
           onClose={() => {
             setVaultPickerQuestionId(null);
             setVaultPickerSearch('');
+          }}
+        />
+      ) : null}
+      {vaultInstallGateOpen ? (
+        <DesignVaultInstallGate
+          onClose={() => setVaultInstallGateOpen(false)}
+          onReady={(info) => {
+            setVaultInstallGateOpen(false);
+            if (typeof window !== 'undefined') {
+              window.location.href = buildVaultDeepLinkUrl(info.baseUrl, window.location.href);
+            }
           }}
         />
       ) : null}
@@ -657,8 +710,13 @@ function VaultTemplateBrowseEntry({
   onOpen: () => void;
 }) {
   const t = useT();
+  const empty = count === 0;
   return (
-    <button type="button" className="qf-vault-browse-card" onClick={onOpen}>
+    <button
+      type="button"
+      className={`qf-vault-browse-card${empty ? ' qf-vault-browse-card-empty' : ''}`}
+      onClick={onOpen}
+    >
       <span className="qf-vault-browse-icon" aria-hidden>
         <i />
         <i />
@@ -666,7 +724,8 @@ function VaultTemplateBrowseEntry({
         <i />
       </span>
       <span className="qf-vault-browse-body">
-        <strong>{t('qf.vaultBrowseAll')}</strong>
+        <strong>{empty ? t('qf.vaultBrowseInstall') : t('qf.vaultBrowseAll')}</strong>
+        {empty ? <small>{t('qf.vaultBrowseInstallDesc')}</small> : null}
       </span>
       {count > 0 ? <em>{t('qf.vaultBrowseAllCount', { count })}</em> : null}
     </button>
@@ -723,8 +782,12 @@ function VaultTemplatePickerModal({
   search,
   readOnly,
   activeVaultTemplateSlug,
+  refreshing,
+  refreshMessage,
   onSearch,
   onSelect,
+  onRefreshFromVault,
+  onOpenDesignVault,
   onClose,
 }: {
   formId: string;
@@ -737,8 +800,12 @@ function VaultTemplatePickerModal({
   search: string;
   readOnly: boolean;
   activeVaultTemplateSlug?: string | null;
+  refreshing: boolean;
+  refreshMessage: string | null;
   onSearch: (value: string) => void;
   onSelect: (design: VaultDesignMeta) => void;
+  onRefreshFromVault: () => void;
+  onOpenDesignVault: () => void;
   onClose: () => void;
 }) {
   const t = useT();
@@ -975,7 +1042,30 @@ function VaultTemplatePickerModal({
             ) : error ? (
               <div className="qf-vault-modal-empty">{error}</div>
             ) : designs.length === 0 ? (
-              <div className="qf-vault-modal-empty">{t('qf.vaultNoTemplates')}</div>
+              <div className="qf-vault-modal-empty qf-vault-modal-empty-action">
+                <span className="qf-vault-empty-title">{t('qf.vaultInstallTitle')}</span>
+                <span className="qf-vault-empty-body">{t('qf.vaultInstallBody')}</span>
+                <span className="qf-vault-empty-actions">
+                  <button
+                    type="button"
+                    className="primary"
+                    onClick={onOpenDesignVault}
+                  >
+                    <Icon name="external-link" size={13} />
+                    <span>{t('qf.vaultInstallAction')}</span>
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost"
+                    disabled={refreshing}
+                    onClick={onRefreshFromVault}
+                  >
+                    <Icon name={refreshing ? 'spinner' : 'refresh'} size={13} />
+                    <span>{refreshing ? t('qf.vaultInstallRefreshing') : t('qf.vaultInstallRefresh')}</span>
+                  </button>
+                </span>
+                {refreshMessage ? <span className="qf-vault-empty-message">{refreshMessage}</span> : null}
+              </div>
             ) : visibleDesigns.length === 0 ? (
               <div className="qf-vault-modal-empty">{t('chat.vaultContextNoMatch')}</div>
             ) : (
