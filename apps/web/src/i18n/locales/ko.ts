@@ -446,6 +446,12 @@ export const ko: Dict = {
   'chat.scrollToLatest': '최신 내용으로 스크롤',
   'chat.you': '나',
   'chat.openFile': '{name} 열기',
+  'chat.notice.deckMediaNoProvider':
+    '아직 이미지 생성 제공자가 설정되어 있지 않습니다. 나중에 모델을 설정하고 이미지를 생성할 수 있도록 명확한 미디어 슬롯을 남긴 채 덱 생성을 계속합니다.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    '사용 가능한 이미지 생성 제공자가 여러 개 있습니다({choices}). 사용할 모델을 지정할 때까지 보류 중인 미디어 슬롯을 남기고 계속 진행합니다.',
+  'chat.error.deckMediaConfigWriteFailed':
+    '덱 미디어 설정을 저장하지 못해 요청된 이미지 슬롯 계획을 잃지 않도록 전송을 중단했습니다.',
   'chat.composerPlaceholder':
     '원하는 디자인을 설명하세요 — 이미지 붙여넣기/끌어놓기 가능, @로 파일 참조…',
   'chat.composerHint':

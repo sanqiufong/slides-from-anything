@@ -401,6 +401,12 @@ export const esES: Dict = {
   'chat.scrollToLatest': 'Desplazar al más reciente',
   'chat.you': 'Tú',
   'chat.openFile': 'Abrir {name}',
+  'chat.notice.deckMediaNoProvider':
+    'Todavía no hay ningún proveedor de generación de imágenes configurado. Continuaré con la presentación y dejaré espacios de medios claramente marcados para que puedas configurar un modelo y generar esas imágenes más tarde.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    'Hay varios proveedores de generación de imágenes disponibles ({choices}). Continuaré con espacios de medios pendientes hasta que indiques qué modelo usar.',
+  'chat.error.deckMediaConfigWriteFailed':
+    'No se pudo guardar la configuración de medios de la presentación, así que el envío se detuvo para no perder el plan de espacios de imagen solicitado.',
   'chat.composerPlaceholder':
     'Describe el diseño que quieres: pega o suelta imágenes, o usa @ para referenciar un archivo…',
   'chat.composerHint':

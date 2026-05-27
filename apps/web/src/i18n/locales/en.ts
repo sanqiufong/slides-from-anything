@@ -465,6 +465,12 @@ export const en: Dict = {
   'chat.scrollToLatest': 'Scroll to latest',
   'chat.you': 'You',
   'chat.openFile': 'Open {name}',
+  'chat.notice.deckMediaNoProvider':
+    "No image generation provider is configured yet. I'll continue the deck with clearly marked media slots so you can configure a model and generate those images later.",
+  'chat.notice.deckMediaAmbiguousProvider':
+    "Multiple image generation providers are available ({choices}). I'll continue with pending media slots until you specify which model to use.",
+  'chat.error.deckMediaConfigWriteFailed':
+    'Deck media settings could not be saved, so sending stopped to avoid losing the requested image-slot plan.',
   'chat.composerPlaceholder':
     'Describe the design you want — paste or drop images, or @ a file…',
   'chat.composerHint':

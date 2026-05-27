@@ -446,6 +446,12 @@ export const ar: Dict = {
   'chat.scrollToLatest': 'التمرير للأحدث',
   'chat.you': 'أنت',
   'chat.openFile': 'فتح {name}',
+  'chat.notice.deckMediaNoProvider':
+    'لم يتم تكوين أي مزود لتوليد الصور بعد. سأتابع إنشاء العرض مع تحديد مواضع الوسائط بوضوح حتى تتمكن لاحقا من تكوين نموذج وتوليد هذه الصور.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    'تتوفر عدة مزودات لتوليد الصور ({choices}). سأتابع بمواضع وسائط معلقة إلى أن تحدد النموذج المطلوب استخدامه.',
+  'chat.error.deckMediaConfigWriteFailed':
+    'تعذر حفظ إعدادات وسائط العرض، لذلك توقف الإرسال لتجنب فقدان خطة مواضع الصور المطلوبة.',
   'chat.composerPlaceholder':
     'صف التصميم الذي تريده - الصق أو اسحب الصور، أو @ لملف...',
   'chat.composerHint':

@@ -445,6 +445,12 @@ export const tr: Dict = {
   'chat.scrollToLatest': 'En son mesaja kaydır',
   'chat.you': 'Sen',
   'chat.openFile': '{name}’ı aç',
+  'chat.notice.deckMediaNoProvider':
+    'Henüz bir görsel üretim sağlayıcısı yapılandırılmamış. Sunumu, daha sonra bir model yapılandırıp bu görselleri üretebilmen için açıkça işaretlenmiş medya alanlarıyla sürdüreceğim.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    'Birden fazla görsel üretim sağlayıcısı kullanılabilir ({choices}). Hangi modeli kullanacağını belirtinceye kadar bekleyen medya alanlarıyla devam edeceğim.',
+  'chat.error.deckMediaConfigWriteFailed':
+    'Sunum medya ayarları kaydedilemedi, bu yüzden istenen görsel alan planını kaybetmemek için gönderim durduruldu.',
   'chat.composerPlaceholder':
     'İstediğiniz tasarımı açıklayın — görsel yapıştırın veya sürükleyin, veya bir dosyayı @’leyin…',
   'chat.composerHint':

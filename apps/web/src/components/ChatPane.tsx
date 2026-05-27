@@ -49,6 +49,7 @@ interface Props {
   collapsed?: boolean;
   onCollapsedChange?: (collapsed: boolean) => void;
   error: string | null;
+  notice?: string | null;
   projectId: string | null;
   projectFiles: ProjectFile[];
   // Names that exist in the project folder. Tool cards and chips use this
@@ -102,6 +103,7 @@ export function ChatPane({
   collapsed = false,
   onCollapsedChange,
   error,
+  notice = null,
   projectId,
   projectFiles,
   projectFileNames,
@@ -507,7 +509,6 @@ export function ChatPane({
                   </Fragment>
                 );
               })}
-              {error ? <div className="msg error">{error}</div> : null}
             </div>
             {scrolledFromBottom ? (
               <button
@@ -521,6 +522,20 @@ export function ChatPane({
               </button>
             ) : null}
           </div>
+          {error || notice ? (
+            <div className="chat-alert-stack">
+              {error ? (
+                <div className="chat-inline-alert error" role="alert">
+                  {error}
+                </div>
+              ) : null}
+              {notice ? (
+                <div className="chat-inline-alert notice" role="status">
+                  {notice}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           <ChatComposer
             ref={composerRef}
             projectId={projectId}

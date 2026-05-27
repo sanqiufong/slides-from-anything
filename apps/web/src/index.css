@@ -869,6 +869,29 @@ code {
   padding: 10px 12px;
   border-radius: var(--radius-sm);
 }
+.chat-alert-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 10px 10px;
+  background: var(--bg-panel);
+}
+.chat-inline-alert {
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.chat-inline-alert.error {
+  border: 1px solid var(--red-border);
+  background: var(--red-bg);
+  color: var(--red);
+}
+.chat-inline-alert.notice {
+  border: 1px solid color-mix(in srgb, var(--accent) 34%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-panel));
+  color: var(--text);
+}
 
 /* -------- Composer -------------------------------------------------- */
 .composer {

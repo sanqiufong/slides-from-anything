@@ -446,6 +446,12 @@ export const hu: Dict = {
   'chat.scrollToLatest': 'Görgetés a legutóbbira',
   'chat.you': 'Te',
   'chat.openFile': '{name} megnyitása',
+  'chat.notice.deckMediaNoProvider':
+    'Még nincs beállítva képgenerálási szolgáltató. Folytatom a prezentációt egyértelműen jelölt médiahelyekkel, hogy később beállíthass egy modellt és legenerálhasd ezeket a képeket.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    'Több képgenerálási szolgáltató is elérhető ({choices}). Függő médiahelyekkel folytatom, amíg meg nem adod, melyik modellt használjam.',
+  'chat.error.deckMediaConfigWriteFailed':
+    'Nem sikerült menteni a prezentáció média-beállításait, ezért a küldés leállt, hogy ne vesszen el a kért képhelyek terve.',
   'chat.composerPlaceholder':
     'Írd le a kívánt designt — illessz be vagy húzz képeket, vagy @-tel hivatkozz fájlra…',
   'chat.composerHint':

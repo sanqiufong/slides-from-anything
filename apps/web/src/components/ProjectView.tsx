@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createHtmlArtifactManifest, inferLegacyManifest } from '../artifacts/manifest';
 import { createArtifactParser } from '../artifacts/parser';
 import { useT } from '../i18n';
+import type { Dict } from '../i18n/types';
 import { streamMessage } from '../providers/anthropic';
 import {
   fetchChatRunStatus,
@@ -169,6 +170,12 @@ export interface DeckMediaImageEnvironment {
   providerId: MediaProviderId;
 }
 
+export type DeckMediaImageModelNotice =
+  | { kind: 'missing-provider' }
+  | { kind: 'ambiguous-provider'; choices: string };
+
+type TranslateFn = (key: keyof Dict, vars?: Record<string, string | number>) => string;
+
 interface MediaProviderConfigLike {
   apiKey?: string;
   baseUrl?: string;
@@ -286,30 +293,35 @@ export function deckMediaImageModelChoice({
   prompt: string;
   existing?: ProjectMetadata['deckMedia'];
   environments: DeckMediaImageEnvironment[];
-}):
-  | { ok: true; model?: string }
-  | { ok: false; message: string } {
+}): { model?: string; notice?: DeckMediaImageModelNotice } {
   const explicitModel = normalizeImageModelFromPrompt(prompt);
-  if (explicitModel) return { ok: true, model: explicitModel };
-  if (existing?.imageModel) return { ok: true, model: existing.imageModel };
+  if (explicitModel) return { model: explicitModel };
+  if (existing?.imageModel) return { model: existing.imageModel };
   const [onlyEnvironment] = environments;
   if (environments.length === 1 && onlyEnvironment) {
-    return { ok: true, model: onlyEnvironment.model };
+    return { model: onlyEnvironment.model };
   }
   if (environments.length === 0) {
     return {
-      ok: false,
-      message:
-        '检测到你要求生成关键配图，但当前没有可用的图片生成环境。请先在设置 > 媒体生成提供方里配置一个图片模型，或在本条消息中明确指定可用模型后再发送。',
+      notice: { kind: 'missing-provider' },
     };
   }
   const choices = environments
     .map((environment) => `${environment.label}：${environment.model}`)
     .join('、');
   return {
-    ok: false,
-    message: `检测到你要求生成关键配图，但当前有多个图片生成环境。请先在消息中指定要用的图像模型（${choices}），我会在开始生成前写入项目配置，避免结束后再补问。`,
+    notice: { kind: 'ambiguous-provider', choices },
   };
+}
+
+function deckMediaImageModelNoticeMessage(
+  t: TranslateFn,
+  notice: DeckMediaImageModelNotice,
+): string {
+  if (notice.kind === 'ambiguous-provider') {
+    return t('chat.notice.deckMediaAmbiguousProvider', { choices: notice.choices });
+  }
+  return t('chat.notice.deckMediaNoProvider');
 }
 
 function extractDeckMediaKeySlidePolicy(text: string): string | null {
@@ -412,6 +424,7 @@ export function ProjectView({
   const [chatCollapsed, setChatCollapsed] = useState(false);
   const [openSlideInspectActive, setOpenSlideInspectActive] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [artifact, setArtifact] = useState<Artifact | null>(null);
   const [filesRefresh, setFilesRefresh] = useState(0);
   const [projectFiles, setProjectFiles] = useState<ProjectFile[]>([]);
@@ -510,6 +523,7 @@ export function ProjectView({
       setAttachedComments([]);
       setArtifact(null);
       setError(null);
+      setNotice(null);
       savedArtifactRef.current = null;
       pendingWritesRef.current.clear();
     })();
@@ -728,6 +742,7 @@ export function ProjectView({
       const explicitOrExistingModel =
         normalizeImageModelFromPrompt(prompt) ?? project.metadata.deckMedia?.imageModel;
       let resolvedImageModel = explicitOrExistingModel ?? undefined;
+      let deckMediaNotice: DeckMediaImageModelNotice | undefined;
       if (!resolvedImageModel) {
         const [daemonProviders, codexImageProxyStatus] = await Promise.all([
           fetchMediaProviderConfigStatus(),
@@ -743,10 +758,7 @@ export function ProjectView({
           existing: project.metadata.deckMedia,
           environments,
         });
-        if (!modelChoice.ok) {
-          setError(modelChoice.message);
-          return false;
-        }
+        deckMediaNotice = modelChoice.notice;
         resolvedImageModel = modelChoice.model;
       }
       const deckMedia = deckMediaFromPrompt(
@@ -761,15 +773,14 @@ export function ProjectView({
       };
       const nextProject = await patchProject(project.id, { metadata });
       if (!nextProject) {
-        setError(
-          '检测到你要求使用媒体模型生成配图，但无法写入 deckMedia 项目配置；已停止发送，避免 agent 只生成占位图。',
-        );
+        setError(t('chat.error.deckMediaConfigWriteFailed'));
         return false;
       }
+      setNotice(deckMediaNotice ? deckMediaImageModelNoticeMessage(t, deckMediaNotice) : null);
       onProjectChange(nextProject);
       return true;
     },
-    [config.mediaProviders, onProjectChange, project.id, project.metadata],
+    [config.mediaProviders, onProjectChange, project.id, project.metadata, t],
   );
 
   // Set of project file names that the chat surface uses to decide whether
@@ -1273,6 +1284,7 @@ export function ProjectView({
       ) {
         return false;
       }
+      setNotice(null);
       const vaultTemplateReady = await lockVaultTemplateFromPrompt(prompt);
       if (!vaultTemplateReady) return false;
       const deckMediaPrompt = resolveDeckMediaIntentPrompt(
@@ -1963,6 +1975,7 @@ export function ProjectView({
           collapsed={chatCollapsed}
           onCollapsedChange={handleChatCollapsedChange}
           error={error}
+          notice={notice}
           projectId={project.id}
           projectFiles={projectFiles}
           projectFileNames={projectFileNames}

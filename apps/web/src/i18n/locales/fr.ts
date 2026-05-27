@@ -446,6 +446,12 @@ export const fr: Dict = {
   'chat.scrollToLatest': 'Défiler jusqu\'au plus récent',
   'chat.you': 'Vous',
   'chat.openFile': 'Ouvrir {name}',
+  'chat.notice.deckMediaNoProvider':
+    "Aucun fournisseur de génération d'image n'est encore configuré. Je continue le deck avec des emplacements média clairement marqués afin que vous puissiez configurer un modèle et générer ces images plus tard.",
+  'chat.notice.deckMediaAmbiguousProvider':
+    "Plusieurs fournisseurs de génération d'image sont disponibles ({choices}). Je continue avec des emplacements média en attente jusqu'à ce que vous indiquiez le modèle à utiliser.",
+  'chat.error.deckMediaConfigWriteFailed':
+    "Les paramètres média du deck n'ont pas pu être enregistrés. L'envoi a été arrêté pour éviter de perdre le plan d'emplacements d'image demandé.",
   'chat.composerPlaceholder':
     'Décrivez le design souhaité — collez ou déposez des images, ou @ un fichier…',
   'chat.composerHint':

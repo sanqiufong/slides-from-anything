@@ -458,6 +458,12 @@ export const ptBR: Dict = {
   'chat.scrollToLatest': 'Rolar para a mais recente',
   'chat.you': 'Você',
   'chat.openFile': 'Abrir {name}',
+  'chat.notice.deckMediaNoProvider':
+    'Nenhum provedor de geração de imagens está configurado ainda. Vou continuar o deck com espaços de mídia claramente marcados para você configurar um modelo e gerar essas imagens depois.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    'Há vários provedores de geração de imagens disponíveis ({choices}). Vou continuar com espaços de mídia pendentes até você especificar qual modelo usar.',
+  'chat.error.deckMediaConfigWriteFailed':
+    'Não foi possível salvar as configurações de mídia do deck, então o envio foi interrompido para não perder o plano de espaços de imagem solicitado.',
   'chat.composerPlaceholder':
     'Descreva o design que você quer — cole ou arraste imagens, ou use @ para referenciar um arquivo…',
   'chat.composerHint':

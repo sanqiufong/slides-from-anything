@@ -513,6 +513,9 @@ export interface Dict {
   'chat.scrollToLatest': string;
   'chat.you': string;
   'chat.openFile': string;
+  'chat.notice.deckMediaNoProvider': string;
+  'chat.notice.deckMediaAmbiguousProvider': string;
+  'chat.error.deckMediaConfigWriteFailed': string;
   'chat.composerPlaceholder': string;
   'chat.composerHint': string;
   'chat.cliSettingsTitle': string;

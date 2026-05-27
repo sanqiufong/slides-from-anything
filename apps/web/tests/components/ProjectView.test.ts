@@ -99,13 +99,28 @@ describe('ProjectView deck media intent', () => {
         prompt: '关键页面生成图片辅助描述',
         environments,
       }),
-    ).toEqual({ ok: true, model: 'gpt-image-2' });
+    ).toEqual({ model: 'gpt-image-2' });
     expect(deckMediaFromPrompt('关键页面生成图片辅助描述', undefined, 'gpt-image-2')?.imageModel).toBe(
       'gpt-image-2',
     );
   });
 
-  it('blocks before sending when multiple image environments need a model choice', () => {
+  it('continues with pending media slots when no image environment is available', () => {
+    const choice = deckMediaImageModelChoice({
+      prompt: '重要页面生成配图',
+      environments: [],
+    });
+
+    expect(choice).toEqual({ notice: { kind: 'missing-provider' } });
+    const deckMedia = deckMediaFromPrompt('重要页面生成配图', undefined, choice.model);
+    expect(deckMedia).toMatchObject({
+      enabled: true,
+      required: true,
+    });
+    expect(deckMedia?.imageModel).toBeUndefined();
+  });
+
+  it('continues with pending media slots when multiple image environments need a model choice', () => {
     const environments = deckMediaImageEnvironments({
       daemonProviders: {
         openai: { configured: true, source: 'stored', baseUrl: '' },
@@ -118,10 +133,14 @@ describe('ProjectView deck media intent', () => {
       environments,
     });
 
-    expect(choice.ok).toBe(false);
-    expect(choice.ok ? '' : choice.message).toContain('多个图片生成环境');
-    expect(choice.ok ? '' : choice.message).toContain('gpt-image-2');
-    expect(choice.ok ? '' : choice.message).toContain('doubao-seedream-3-0-t2i-250415');
+    expect(choice.model).toBeUndefined();
+    expect(choice.notice).toMatchObject({ kind: 'ambiguous-provider' });
+    expect(choice.notice?.kind === 'ambiguous-provider' ? choice.notice.choices : '').toContain(
+      'gpt-image-2',
+    );
+    expect(choice.notice?.kind === 'ambiguous-provider' ? choice.notice.choices : '').toContain(
+      'doubao-seedream-3-0-t2i-250415',
+    );
   });
 });
 

@@ -399,6 +399,12 @@ export const ja: Dict = {
   'chat.scrollToLatest': '最新にスクロール',
   'chat.you': 'あなた',
   'chat.openFile': '{name} を開く',
+  'chat.notice.deckMediaNoProvider':
+    '画像生成プロバイダーがまだ設定されていません。デッキ生成は続行し、あとでモデルを設定して画像を生成できるように、メディア枠を明示しておきます。',
+  'chat.notice.deckMediaAmbiguousProvider':
+    '複数の画像生成プロバイダーがあります（{choices}）。使用するモデルが指定されるまで、保留中のメディア枠を残して生成を続行します。',
+  'chat.error.deckMediaConfigWriteFailed':
+    'デッキのメディア設定を保存できませんでした。要求された画像枠の計画を失わないよう、送信を停止しました。',
   'chat.composerPlaceholder':
     '欲しいデザインを説明してください — 画像を貼り付けるかドロップ、または @ でファイルを参照…',
   'chat.composerHint':

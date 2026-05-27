@@ -400,6 +400,12 @@ export const de: Dict = {
   'chat.scrollToLatest': 'Zur neuesten scrollen',
   'chat.you': 'Sie',
   'chat.openFile': '{name} öffnen',
+  'chat.notice.deckMediaNoProvider':
+    'Noch ist kein Bildgenerierungsanbieter konfiguriert. Ich fahre mit dem Deck fort und markiere Medienslots klar, damit Sie später ein Modell einrichten und die Bilder erzeugen können.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    'Mehrere Bildgenerierungsanbieter sind verfügbar ({choices}). Ich fahre mit ausstehenden Medienslots fort, bis Sie angeben, welches Modell verwendet werden soll.',
+  'chat.error.deckMediaConfigWriteFailed':
+    'Die Deck-Medieneinstellungen konnten nicht gespeichert werden. Der Versand wurde gestoppt, damit die geplanten Bildslots nicht verloren gehen.',
   'chat.composerPlaceholder':
     'Beschreiben Sie das gewünschte Design — Bilder einfügen/ablegen oder mit @ eine Datei referenzieren…',
   'chat.composerHint':

@@ -460,6 +460,12 @@ export const zhTW: Dict = {
   'chat.scrollToLatest': '捲動到最新',
   'chat.you': '你',
   'chat.openFile': '開啟 {name}',
+  'chat.notice.deckMediaNoProvider':
+    '目前還沒有可用的圖片生成環境。生成會繼續，並在 PPT 中保留明確的待生成配圖位置；你後續設定圖片模型後再補生成即可。',
+  'chat.notice.deckMediaAmbiguousProvider':
+    '目前有多個圖片生成環境（{choices}）。生成會先繼續，並在 PPT 中保留待生成配圖位置；你後續指定模型後再補生成即可。',
+  'chat.error.deckMediaConfigWriteFailed':
+    '無法寫入 deckMedia 專案設定；已停止傳送，避免遺失本輪要求的配圖佔位規劃。',
   'chat.composerPlaceholder': '描述你想要的設計 — 可貼上/拖入圖片，或用 @ 引用檔案…',
   'chat.composerHint': '⌘/Ctrl + Enter 傳送 · 可貼上圖片 · @ 引用檔案',
   'chat.cliSettingsTitle': 'CLI 與模型設定',

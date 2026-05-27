@@ -446,6 +446,12 @@ export const pl: Dict = {
   'chat.scrollToLatest': 'Przewiń do najnowszych',
   'chat.you': 'Ty',
   'chat.openFile': 'Otwórz {name}',
+  'chat.notice.deckMediaNoProvider':
+    'Nie skonfigurowano jeszcze dostawcy generowania obrazów. Będę kontynuować deck z wyraźnie oznaczonymi miejscami na media, aby później można było skonfigurować model i wygenerować te obrazy.',
+  'chat.notice.deckMediaAmbiguousProvider':
+    'Dostępnych jest kilku dostawców generowania obrazów ({choices}). Będę kontynuować z oczekującymi miejscami na media, dopóki nie wskażesz modelu do użycia.',
+  'chat.error.deckMediaConfigWriteFailed':
+    'Nie udało się zapisać ustawień mediów decku, więc wysyłanie zatrzymano, aby nie utracić planu żądanych miejsc na obrazy.',
   'chat.composerPlaceholder':
       'Opisz projekt, który chcesz stworzyć — wklej obrazy lub użyj @, aby wskazać plik…',
   'chat.composerHint':
