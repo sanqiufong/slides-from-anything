@@ -1721,10 +1721,35 @@ function decodeURIComponentSafe(value) {
   }
 }
 
-async function sendLocalVaultPreview(slug, kind, res) {
+const VAULT_PPT_SLIDES = new Set(['title', 'data', 'image', 'single', 'multi']);
+
+function normalizeVaultPptSlide(value) {
+  const slide = cleanString(value);
+  return VAULT_PPT_SLIDES.has(slide) ? slide : '';
+}
+
+function withBodyClass(html, className) {
+  return String(html).replace(/<body\b([^>]*)>/i, (_match, attrs) => {
+    if (/class\s*=/i.test(attrs)) {
+      return `<body${attrs.replace(/class\s*=\s*(["'])(.*?)\1/i, (_classMatch, quote, value) => `class=${quote}${value} ${className}${quote}`)}>`;
+    }
+    return `<body${attrs} class="${className}">`;
+  });
+}
+
+function focusLocalVaultPptSlideHtml(html, slide) {
+  const safeSlide = normalizeVaultPptSlide(slide);
+  if (!safeSlide) return html;
+  const style = `<style id="dv-ppt-single-preview">html,body.dv-single-ppt-preview{width:1120px!important;height:630px!important;min-width:1120px!important;min-height:630px!important;margin:0!important;padding:0!important;overflow:hidden!important;background:transparent!important}body.dv-single-ppt-preview{display:block!important;align-items:stretch!important;justify-content:flex-start!important;gap:0!important;color:inherit!important}body.dv-single-ppt-preview *{box-sizing:border-box}body.dv-single-ppt-preview main{display:block!important;width:1120px!important;height:630px!important;min-height:0!important;padding:0!important;margin:0!important;overflow:hidden!important;background:transparent!important}body.dv-single-ppt-preview .dv-ppt-slide:not([data-slide="${safeSlide}"]),body.dv-single-ppt-preview .slide[data-slide]:not([data-slide="${safeSlide}"]){display:none!important}body.dv-single-ppt-preview .dv-ppt-slide[data-slide="${safeSlide}"],body.dv-single-ppt-preview .slide[data-slide="${safeSlide}"]{width:1120px!important;height:630px!important;max-width:none!important;max-height:none!important;aspect-ratio:16/9!important;margin:0!important;position:relative!important;left:0!important;top:0!important;overflow:hidden!important;border-radius:0!important;box-shadow:none!important;contain:layout paint}body.dv-single-ppt-preview .dv-ppt-slide[data-slide="${safeSlide}"] img,body.dv-single-ppt-preview .slide[data-slide="${safeSlide}"] img{max-width:100%;max-height:100%}</style>`;
+  const withStyle = /<\/head>/i.test(html) ? String(html).replace(/<\/head>/i, `${style}</head>`) : `${style}${html}`;
+  return /<body\b/i.test(withStyle) ? withBodyClass(withStyle, 'dv-single-ppt-preview') : withStyle;
+}
+
+async function sendLocalVaultPreview(slug, kind, res, options = {}) {
   const target = localVaultPreviewPath(slug, kind);
   if (!target) return false;
-  const html = await fs.promises.readFile(target, 'utf8');
+  const rawHtml = await fs.promises.readFile(target, 'utf8');
+  const html = kind === 'ppt' ? focusLocalVaultPptSlideHtml(rawHtml, options.slide) : rawHtml;
   res
     .status(200)
     .set('content-type', 'text/html; charset=utf-8')
@@ -3383,16 +3408,18 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     try {
       const slug = cleanString(req.params.slug);
       const kind = req.query?.kind === 'card' ? 'card' : req.query?.kind === 'ppt' ? 'ppt' : 'web';
-      if (await sendLocalVaultPreview(slug, kind, res)) return;
+      const slide = normalizeVaultPptSlide(req.query?.slide);
+      if (await sendLocalVaultPreview(slug, kind, res, { slide })) return;
       if (!externalVaultEnabled()) return sendFallbackVaultPreview(slug, kind, res);
       const target = new URL(`/api/designs/${encodeURIComponent(slug)}/preview`, vaultOrigin());
       target.searchParams.set('kind', kind);
+      if (slide) target.searchParams.set('slide', slide);
       const surface = cleanString(req.query?.surface);
       if (surface) target.searchParams.set('surface', surface);
       const upstream = await fetch(target);
       const body = await upstream.text();
       if (!upstream.ok) {
-        if (await sendLocalVaultPreview(slug, kind, res)) return;
+        if (await sendLocalVaultPreview(slug, kind, res, { slide })) return;
         return sendFallbackVaultPreview(slug, kind, res);
       }
       res
@@ -3403,7 +3430,8 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     } catch (err) {
       const slug = cleanString(req.params.slug);
       const kind = req.query?.kind === 'card' ? 'card' : req.query?.kind === 'ppt' ? 'ppt' : 'web';
-      if (await sendLocalVaultPreview(slug, kind, res)) return;
+      const slide = normalizeVaultPptSlide(req.query?.slide);
+      if (await sendLocalVaultPreview(slug, kind, res, { slide })) return;
       sendFallbackVaultPreview(slug, kind, res);
     }
   });

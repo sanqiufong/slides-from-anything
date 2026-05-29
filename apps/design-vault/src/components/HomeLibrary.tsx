@@ -453,13 +453,31 @@ function ProjectMiniPreview({
 
 function StyleMiniPreview({ compact = false, design }: { compact?: boolean; design: DesignMeta }) {
   if (design.slug.length > 0) {
+    const hasPptCover = Boolean(design.previews.ppt);
+    const frame = hasPptCover
+      ? {
+          ariaLabel: `${design.title} PPT 首页`,
+          canvasWidth: 1120,
+          canvasHeight: 630,
+          src: `/api/designs/${design.slug}/preview?kind=ppt&slide=title`,
+          title: `${design.title} PPT 首页`,
+        }
+      : {
+          ariaLabel: `${design.title} 风格样张`,
+          canvasWidth: 800,
+          canvasHeight: 500,
+          src: `/api/designs/${design.slug}/preview?kind=card&surface=library`,
+          title: `${design.title} 风格样张`,
+        };
     return (
       <ScaledPreviewFrame
-        ariaLabel={`${design.title} 风格样张`}
+        ariaLabel={frame.ariaLabel}
+        canvasWidth={frame.canvasWidth}
+        canvasHeight={frame.canvasHeight}
         className="w-full rounded-lg border border-line shadow-inner"
-        src={`/api/designs/${design.slug}/preview?kind=card&surface=library`}
+        src={frame.src}
         tabIndex={-1}
-        title={`${design.title} 风格样张`}
+        title={frame.title}
       />
     );
   }

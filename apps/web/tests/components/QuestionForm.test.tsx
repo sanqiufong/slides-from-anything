@@ -432,8 +432,8 @@ describe('QuestionFormView Vault template picker', () => {
     expect(cards[0]?.querySelector('iframe')?.getAttribute('src')).toContain('surface=library');
     expect(cards[0]?.querySelector('.qf-vault-preview-scaled')).toBeTruthy();
     expect(cards[1]?.textContent).toContain('Phantom');
-    expect(cards[2]?.querySelector('iframe')?.getAttribute('src')).toContain('/api/vault/designs/guizang-ppt-skill-test/preview?kind=card');
-    expect(cards[2]?.querySelector('iframe')?.getAttribute('src')).toContain('surface=library');
+    expect(cards[2]?.querySelector('iframe')?.getAttribute('src')).toContain('/api/vault/designs/guizang-ppt-skill-test/preview?kind=ppt&slide=title');
+    expect(cards[2]?.querySelector('iframe')?.style.width).toBe('1120px');
   });
 
   it('renders prose-inferred Vault recommendations as visual preview cards', async () => {
@@ -483,7 +483,7 @@ describe('QuestionFormView Vault template picker', () => {
     );
     expect(cards[0]?.querySelector('iframe')?.getAttribute('src')).toContain('surface=library');
     expect(cards[1]?.textContent).toContain('guizang-ppt-skill');
-    expect(cards[1]?.querySelector('iframe')?.getAttribute('src')).toContain('/api/vault/designs/guizang-ppt-skill-test/preview?kind=card');
+    expect(cards[1]?.querySelector('iframe')?.getAttribute('src')).toContain('/api/vault/designs/guizang-ppt-skill-test/preview?kind=ppt&slide=title');
   });
 
   it('does not render unmatched prose options as fake Vault preview cards', async () => {
@@ -523,9 +523,9 @@ describe('QuestionFormView Vault template picker', () => {
     expect(document.querySelector('.qf-vault-options')?.textContent).not.toContain('Medium — headline');
     expect(document.querySelector('.qf-vault-options')?.textContent).not.toContain('Dense — diagrams');
     expect(cards[0]?.querySelector('iframe')?.getAttribute('src')).toContain(
-      '/api/vault/designs/black-and-gray-minimalist-creative-portfolio-presentation/preview?kind=card',
+      '/api/vault/designs/black-and-gray-minimalist-creative-portfolio-presentation/preview?kind=ppt&slide=title',
     );
-    expect(cards[0]?.querySelector('iframe')?.getAttribute('src')).toContain('surface=library');
+    expect(cards[0]?.querySelector('iframe')?.style.height).toBe('630px');
   });
 
   it('keeps the all-template catalog available as read-only after submission', async () => {

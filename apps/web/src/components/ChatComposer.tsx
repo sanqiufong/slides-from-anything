@@ -11,6 +11,7 @@ import type { Dict } from '../i18n/types';
 import { fetchVaultDesigns, projectRawUrl, uploadProjectFiles, openFolderDialog } from "../providers/registry";
 import { patchProject } from "../state/projects";
 import type { ChatAttachment, ChatCommentAttachment, ChatVaultContextAttachment, ProjectFile, ProjectMetadata, VaultDesignMeta } from "../types";
+import { vaultTemplateCoverPreviewSource } from "../utils/vaultPreview";
 import { Icon } from "./Icon";
 import { VaultPreviewFrame } from "./VaultPreviewFrame";
 
@@ -1126,7 +1127,9 @@ function VaultContextPreviewCard({
             <VaultPreviewFrame
               className="vault-context-frame-wrap"
               src={previewSrc.src}
-              title={`${design.title} style card preview`}
+              title={previewSrc.title}
+              width={previewSrc.width}
+              height={previewSrc.height}
               sandbox=""
             />
           )
@@ -1194,17 +1197,8 @@ function vaultKindLabel(item: Pick<ChatVaultContextAttachment, 'kind' | 'package
   return t('chat.vaultContextDesignSystem');
 }
 
-function vaultPreviewSrc(design: VaultDesignMeta): { kind: 'frame' | 'image'; src: string } | null {
-  const kind = design.previews?.card ? 'card' : design.previews?.ppt ? 'ppt' : design.previews?.web ? 'web' : '';
-  if (design.slug && kind) {
-    return {
-      kind: 'frame',
-      src: `/api/vault/designs/${encodeURIComponent(design.slug)}/preview?kind=${kind}${kind === 'card' ? '&surface=library' : ''}`,
-    };
-  }
-  const image = design.previewImage;
-  if (image) return { kind: 'image', src: image };
-  return null;
+function vaultPreviewSrc(design: VaultDesignMeta) {
+  return vaultTemplateCoverPreviewSource(design);
 }
 
 function vaultSourceLabel(design: VaultDesignMeta): string {

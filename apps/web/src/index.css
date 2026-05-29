@@ -5803,7 +5803,7 @@ button.connector-action.is-loading {
 .vault-thumb {
   position: relative;
   width: 100%;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   border-bottom: 1px solid var(--border);
   background: transparent;
@@ -5967,8 +5967,7 @@ button.connector-action.is-loading {
   flex: none;
   display: block;
   width: 100%;
-  height: clamp(124px, 28vw, 154px);
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 9;
   overflow: hidden;
   border-radius: 7px;
   border: 1px solid var(--vault-line);
@@ -12224,6 +12223,8 @@ img.vault-template-preview-media {
 }
 
 .qf-vault-options .qf-vault-preview-real {
+  align-self: start;
+  aspect-ratio: 16 / 9;
   padding: 0;
 }
 
@@ -12837,7 +12838,7 @@ img.vault-template-preview-media {
 }
 .qf-vault-preview {
   width: 100%;
-  aspect-ratio: 16 / 10;
+  aspect-ratio: 16 / 9;
   border-radius: 10px;
   background:
     linear-gradient(135deg, transparent 0 54%, color-mix(in srgb, var(--qf-vault-primary) 18%, transparent) 54% 55%, transparent 55%),

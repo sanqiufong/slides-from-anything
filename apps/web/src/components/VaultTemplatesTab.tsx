@@ -12,6 +12,7 @@ import {
 import type { VaultDesignMeta, VaultIngestionJob, VaultSyncResponse } from '../types';
 import { useT } from '../i18n';
 import { buildVaultDeepLinkUrl } from '../utils/vaultDeepLink';
+import { vaultTemplateCoverPreviewSource } from '../utils/vaultPreview';
 import { DesignVaultInstallGate } from './DesignVaultInstallGate';
 import { Icon } from './Icon';
 import { CenteredLoader } from './Loading';
@@ -559,7 +560,7 @@ export function VaultTemplatesTab() {
       ) : (
         <div className={`ds-grid vault-grid vault-grid-${viewMode}`}>
           {sortedDesigns.map((design) => {
-            const preview = vaultTemplatePreviewSource(design);
+            const preview = vaultTemplateCoverPreviewSource(design);
             const category = vaultCategoryValue(design);
             return (
               <article key={design.slug} className="ds-card vault-card">
@@ -569,7 +570,9 @@ export function VaultTemplatesTab() {
                   ) : preview?.kind === 'frame' ? (
                     <VaultPreviewFrame
                       src={preview.src}
-                      title={`${design.title} style card preview`}
+                      title={preview.title}
+                      width={preview.width}
+                      height={preview.height}
                       sandbox=""
                     />
                   ) : null}
@@ -769,22 +772,4 @@ function vaultDisplayLabel(value: string): string {
     .replace(/\burl\b/gi, 'URL')
     .replace(/\bpptx\b/gi, 'PPTX')
     .replace(/\bpdf\b/gi, 'PDF');
-}
-
-function vaultTemplatePreviewKind(design: VaultDesignMeta): 'ppt' | 'card' | 'web' {
-  if (design.previews?.card) return 'card';
-  if (design.previews?.ppt) return 'ppt';
-  return 'web';
-}
-
-function vaultTemplatePreviewSource(design: VaultDesignMeta): { kind: 'frame' | 'image'; src: string } | null {
-  const kind = vaultTemplatePreviewKind(design);
-  if (!design.previews?.card && !design.previews?.ppt && !design.previews?.web) {
-    return design.previewImage ? { kind: 'image', src: design.previewImage } : null;
-  }
-  const surface = kind === 'card' ? '&surface=library' : '';
-  return {
-    kind: 'frame',
-    src: `/api/vault/designs/${encodeURIComponent(design.slug)}/preview?kind=${kind}${surface}`,
-  };
 }

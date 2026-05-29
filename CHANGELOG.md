@@ -6,6 +6,20 @@ This project follows semantic versioning from the public integration baseline.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-05-29
+
+### Changed
+
+- Use PPT title-slide previews as Design Vault template covers across the
+  library, project setup, question form, and chat Vault context surfaces.
+- Carry the focused PPT preview dimensions through iframe scaling so slide
+  covers render as native 16:9 templates instead of web-derived cards.
+
+### Fixed
+
+- Removed the top and bottom whitespace around focused PPT preview slides while
+  preserving each slide's original internal layout rules.
+
 ## [1.0.0] - 2026-05-25
 
 Initial open-source integration release.

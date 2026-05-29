@@ -4,6 +4,7 @@ import type { ConnectorDetail } from '@open-design/contracts';
 import { useT } from '../i18n';
 import type { Dict } from '../i18n/types';
 import { fetchPromptTemplate } from '../providers/registry';
+import { vaultTemplateCoverPreviewSource } from '../utils/vaultPreview';
 import type {
   AudioKind,
   DesignSystemSummary,
@@ -665,12 +666,7 @@ function VaultDesignTemplateCard({
   const swatches = vaultPreviewSwatches(design);
   const previewTitle = vaultPreviewTitle(design.title);
   const trait = vaultTemplateTrait(design);
-  const previewKind = design.previews?.card ? 'card' : design.previews?.ppt ? 'ppt' : design.previews?.web ? 'web' : '';
-  const previewImage = previewKind ? '' : design.previewImage;
-  const previewFrame =
-    !previewImage && previewKind
-      ? `/api/vault/designs/${encodeURIComponent(design.slug)}/preview?kind=${previewKind}${previewKind === 'card' ? '&surface=library' : ''}`
-      : '';
+  const preview = vaultTemplateCoverPreviewSource(design);
   const typeLabel = vaultTemplateTypeLabel(design);
 
   return (
@@ -681,17 +677,19 @@ function VaultDesignTemplateCard({
       aria-pressed={active}
     >
       <span
-        className={`vault-template-preview vault-preview-${variant}${previewImage || previewFrame ? ' vault-template-preview-real' : ''}`}
+        className={`vault-template-preview vault-preview-${variant}${preview ? ' vault-template-preview-real' : ''}`}
         style={style}
         aria-hidden="true"
       >
-        {previewImage ? (
-          <img className="vault-template-preview-media" src={previewImage} alt="" loading="lazy" />
-        ) : previewFrame ? (
+        {preview?.kind === 'image' ? (
+          <img className="vault-template-preview-media" src={preview.src} alt="" loading="lazy" />
+        ) : preview?.kind === 'frame' ? (
           <VaultPreviewFrame
             className="vault-template-preview-media"
-            src={previewFrame}
-            title={`${design.title} style card preview`}
+            src={preview.src}
+            title={preview.title}
+            width={preview.width}
+            height={preview.height}
             sandbox=""
           />
         ) : (

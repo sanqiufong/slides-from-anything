@@ -89,7 +89,7 @@ describe('VaultTemplatesTab', () => {
     document.body.innerHTML = '';
   });
 
-  it('uses card preview iframe with library surface before ppt or preview images', async () => {
+  it('uses the PPT title slide as the template cover before card previews or preview images', async () => {
     await act(async () => {
       root.render(<VaultTemplatesTab />);
       await Promise.resolve();
@@ -99,10 +99,12 @@ describe('VaultTemplatesTab', () => {
       .find((node) => node.getAttribute('src')?.includes(hardWorkClub.slug));
 
     expect(iframe?.getAttribute('src')).toBe(
-      '/api/vault/designs/hard-work-club-www-hardworkclub-com/preview?kind=card&surface=library',
+      '/api/vault/designs/hard-work-club-www-hardworkclub-com/preview?kind=ppt&slide=title',
     );
-    expect(iframe?.getAttribute('title')).toBe('Hard Work Club style card preview');
+    expect(iframe?.getAttribute('title')).toBe('Hard Work Club PPT cover preview');
     expect(iframe?.getAttribute('loading')).toBe('lazy');
+    expect(iframe?.style.width).toBe('1120px');
+    expect(iframe?.style.height).toBe('630px');
     expect(document.querySelector('.vault-thumb img')).toBeNull();
     expect(document.body.textContent).toContain('交互视觉系统');
     expect(document.body.textContent).toContain('网站风格');

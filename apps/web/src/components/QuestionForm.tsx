@@ -10,6 +10,7 @@ import {
 } from '../providers/registry';
 import type { VaultDesignMeta } from '../types';
 import { buildVaultDeepLinkUrl } from '../utils/vaultDeepLink';
+import { vaultTemplateCoverPreviewSource } from '../utils/vaultPreview';
 import { DesignVaultInstallGate } from './DesignVaultInstallGate';
 import { Icon } from './Icon';
 import { VaultPreviewFrame } from './VaultPreviewFrame';
@@ -601,12 +602,7 @@ function VaultTemplateOptionView({
     design?.profile?.layoutIntensity ||
     design?.profile?.archetype ||
     'slide-ready layout';
-  const previewKind = design?.previews?.card ? 'card' : design?.previews?.ppt ? 'ppt' : design?.previews?.web ? 'web' : '';
-  const previewImage = previewKind ? '' : design?.previewImage || '';
-  const previewFrame =
-    !previewImage && design?.slug && previewKind
-      ? `/api/vault/designs/${encodeURIComponent(design.slug)}/preview?kind=${previewKind}${previewKind === 'card' ? '&surface=library' : ''}`
-      : '';
+  const preview = design ? vaultTemplateCoverPreviewSource(design) : null;
   const typeLabel = design ? vaultTypeLabel(design) : '';
 
   if (parsed.agentChoice) {
@@ -643,14 +639,16 @@ function VaultTemplateOptionView({
           if (!readOnly) onSelect();
         }}
       />
-      <span className={`qf-vault-preview${previewImage || previewFrame ? ' qf-vault-preview-real' : ''}`} aria-hidden>
-        {previewImage ? (
-          <img className="qf-vault-preview-media" src={previewImage} alt="" loading="lazy" />
-        ) : previewFrame ? (
+      <span className={`qf-vault-preview${preview ? ' qf-vault-preview-real' : ''}`} aria-hidden>
+        {preview?.kind === 'image' ? (
+          <img className="qf-vault-preview-media" src={preview.src} alt="" loading="lazy" />
+        ) : preview?.kind === 'frame' ? (
           <VaultPreviewFrame
             className="qf-vault-preview-scaled"
-            src={previewFrame}
-            title={`${title} style card preview`}
+            src={preview.src}
+            title={preview.title}
+            width={preview.width}
+            height={preview.height}
             sandbox=""
           />
         ) : (
