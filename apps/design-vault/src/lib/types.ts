@@ -474,6 +474,13 @@ export type DesignSystemProfile = {
     rationale: string;
     layoutDirectives: string[];
     avoidDirectives: string[];
+    /**
+     * v1 hero-viewport override (additive, optional). Set when the top/load
+     * viewport is a desaturated intro frame; carries the path of an earlier
+     * content viewport that has the brand's saturated color, so previews lead
+     * with substance rather than a void hero. Absent → default top viewport.
+     */
+    heroAsset?: string;
   };
   colorRoles: {
     brandPrimary: string;
@@ -556,6 +563,12 @@ export type DesignSystemProfile = {
   compositionSignatures: string[];
   componentSignatures: ComponentSignature[];
   componentMotionRecipes?: ComponentMotionRecipe[];
+  /**
+   * v1 page-level motion choreography (additive, flag-gated). Optional and
+   * provenance-stamped. Omitted entirely when OD_MOTION_CHOREOGRAPHY is off,
+   * keeping profile.json byte-identical to pre-feature output.
+   */
+  motionChoreography?: import("./motion-choreography").MotionChoreography;
   interactionModel: {
     character: string;
     states: string[];

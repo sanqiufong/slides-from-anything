@@ -69,6 +69,15 @@ export interface VaultDesignMeta {
       brandSecondary: string;
       background: string;
       text: string;
+      surfaceAlternate?: string | null;
+      surfaceDeep?: string | null;
+      accentPalette?: Array<{
+        hex: string;
+        role?: string | null;
+        canonicalRole?: string | null;
+        coverage?: string | null;
+        evidence?: string | null;
+      }> | null;
     };
     typographyRoles?: {
       display?: string;

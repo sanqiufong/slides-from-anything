@@ -1,4 +1,5 @@
 import { compileTokenStylesheet } from "./token-stylesheet";
+import { stripTitleBoilerplate } from "./title";
 import type { ComponentMotionRecipe, DesignMeta } from "./types";
 
 /**
@@ -191,6 +192,81 @@ function isCanvaDesign(meta: DesignMeta) {
   return meta.sourceMode === "canva-template" || meta.sourceMode === "canva-editor";
 }
 
+/**
+ * Generic visual-evidence score for an asset. Higher = more likely to be a
+ * real, recognisable source visual (rendered viewport, hero/cover, og-image)
+ * rather than an icon/favicon/sprite. Shared by the card/web/ppt previews to
+ * decide whether to lead with a real screenshot, and re-exported for
+ * card-preview.ts to order the asset list it hands the model.
+ */
+export function assetEvidenceScore(asset: DesignMeta["assets"][number]) {
+  const corpus = `${asset.kind} ${asset.name} ${asset.path} ${asset.sourceUrl ?? ""}`.toLowerCase();
+  let score = 0;
+  if (asset.kind === "image") score += 40;
+  if (asset.kind === "logo") score += 20;
+  if (asset.kind === "svg") score += 8;
+  if (/hero|cover|main|lead|masthead|banner|poster|og-image|twitter-image|source-image/.test(corpus)) score += 80;
+  if (/visual-journey|rendered viewport|screenshot|scroll-y/.test(corpus)) score += 95;
+  if (/background|bg|inline-bg|css-image/.test(corpus)) score += 45;
+  if (/product|case|work|gallery|project|photo|image/.test(corpus)) score += 25;
+  if (/\.(?:webp|avif|jpe?g|png)(?:[?#]|$)/.test(corpus) || /\/_next\/image\?/.test(corpus)) score += 18;
+  if (/logo|brand|mark/.test(corpus)) score += asset.kind === "logo" ? 22 : -18;
+  if (/favicon|sprite|icon-|apple-touch|mask-icon|placeholder|loader|pixel|tracking/.test(corpus)) score -= 90;
+  return score;
+}
+
+// A page screenshot (visual-journey) scores 100; real hero/og imagery 70;
+// content photo 45. "Strong" == 70+, so the hero is always a faithful depiction
+// of the source — never a content thumbnail, and (see below) never a logo.
+const STRONG_SCREENSHOT_SCORE = 70;
+
+/**
+ * Pick the asset that most faithfully depicts the rendered source, to LEAD a
+ * preview with. This is a hero selector, not a generic ranker:
+ *   - only raster `image` assets qualify — a logo/icon/svg blown up to fill an
+ *     800x500 stage looks broken;
+ *   - score off the asset NAME/PATH only (never `sourceUrl` — a logo served
+ *     from a `/hero/` or `/_next/image?...` URL must not masquerade as a hero);
+ *   - rank: real page screenshot (visual-journey) > og/hero imagery > content
+ *     photo. Returns null when nothing depicts the source, so callers fall back
+ *     to the specimen/LLM path instead of leading with a brand mark.
+ * (assetEvidenceScore stays the ranker for the model's asset list, where logos
+ *  and sourceUrl hints are legitimate context.)
+ */
+export function bestScreenshotAsset(meta: DesignMeta): { path: string; score: number } | null {
+  // Honor a synthesis-pinned hero override (set only when the top/load viewport
+  // is a desaturated intro frame and a later content viewport carries the brand
+  // color — e.g. Yuga's black dot-matrix splash → its lime collection frame).
+  const pinned = meta.profile?.previewStrategy?.heroAsset;
+  if (pinned && meta.assets.some((asset) => asset.path === pinned)) {
+    return { path: pinned, score: 100 };
+  }
+  let best: { path: string; score: number } | null = null;
+  for (const asset of meta.assets) {
+    if (asset.kind !== "image" || !asset.path) continue;
+    const corpus = `${asset.name} ${asset.path}`.toLowerCase();
+    if (/fallback|generated|placeholder|sprite|favicon|icon-|mask-icon|apple-touch|logo|wordmark|style-source/.test(corpus)) continue;
+    let score: number;
+    if (/visual-journey|rendered viewport|screenshot|scroll-viewport|load-viewport|scroll-y/.test(corpus)) score = 100;
+    else if (/og-image|twitter-image|hero|cover|masthead|banner|poster|lead/.test(corpus)) score = 70;
+    else if (/dom-image|product|gallery|project|photo|case|work|background/.test(corpus)) score = 45;
+    else continue;
+    if (!best || score > best.score) best = { path: asset.path, score };
+  }
+  return best;
+}
+
+/**
+ * Gate for the screenshot-led preview path. Canva sources have no
+ * visual-journey assets and keep their existing deterministic renderers, so
+ * short-circuit to false for them.
+ */
+export function hasStrongScreenshot(meta: DesignMeta): boolean {
+  if (isCanvaDesign(meta)) return false;
+  const best = bestScreenshotAsset(meta);
+  return best !== null && best.score >= STRONG_SCREENSHOT_SCORE;
+}
+
 function sourcePreviewImages(meta: DesignMeta, limit = 4) {
   const preferred = firstPreviewAsset(meta);
   return meta.assets
@@ -235,12 +311,8 @@ function cssFontFamily(input: string | undefined, fallback: string) {
 }
 
 function sourceDisplayTitle(meta: DesignMeta) {
-  const cleaned = (meta.profile?.systemName || meta.title)
-    .replace(/\s*[-–—]\s*templates? by canva.*$/i, "")
-    .replace(/\s+presentation\s+in\s+.+?\s+style$/i, "")
-    .replace(/\s+template\s*$/i, "")
-    .trim();
-  return compactLine(cleaned || meta.title, meta.title, 34);
+  const cleaned = stripTitleBoilerplate(meta.profile?.systemName || meta.title);
+  return compactLine(cleaned || meta.title, meta.title, 44);
 }
 
 function sourceUsageLabel(meta: DesignMeta) {
@@ -321,7 +393,7 @@ function renderPptSampleDeck(meta: DesignMeta, selectedSlide?: string | null) {
   const sourceLabel = sourceMetaLabel(meta);
   const usageLabel = sourceUsageLabel(meta);
   const images = imageFrames(meta, 5);
-  const heroImage = images[0];
+  const heroImage = bestScreenshotAsset(meta)?.path || images[0];
   const modules = slideTextSamples(meta);
   const singleModule = modules[0];
   const motionRecipe = primaryMotionRecipe(meta);
@@ -502,16 +574,22 @@ function renderPptSampleDeck(meta: DesignMeta, selectedSlide?: string | null) {
 </html>`;
 }
 
-function renderCanvaDerivedCardPreview(meta: DesignMeta, surface: "web" | "ppt" | "library") {
+function renderScreenshotLedCardPreview(meta: DesignMeta, surface: "web" | "ppt" | "library") {
   const images = sourcePreviewImages(meta, 3);
-  const image = images[0] || firstPreviewImage(meta);
+  const image = bestScreenshotAsset(meta)?.path || images[0] || firstPreviewImage(meta);
   const colors = semanticColors(meta);
   const displayFont = cssFontFamily(meta.profile?.typographyRoles?.display || meta.tokens.typography.families.display, "Arial Black, Arial, sans-serif");
   const monoFont = cssFontFamily(meta.profile?.typographyRoles?.mono || meta.tokens.typography.families.mono, "IBM Plex Mono, ui-monospace, monospace");
   const title = sourceDisplayTitle(meta);
   const label = sourceUsageLabel(meta);
   const sourceLabel = sourceMetaLabel(meta);
-  const modeLabel = surface === "ppt" ? "PPT derivative" : surface === "web" ? "Web derivative" : sourceModeLabel(meta, "Canva");
+  const modeLabel = surface === "ppt" ? "PPT derivative" : surface === "web" ? "Web derivative" : sourceModeLabel(meta, "Source");
+  // Full-page website screenshots already carry their own title, nav and
+  // branding, so the dark gradient + redundant white headline (designed for
+  // single-image Canva derivatives) clashes — worst on light brands like Le
+  // Puzz. Render those clean (screenshot edge-to-edge, top-anchored, just a
+  // small source chip); keep the caption treatment only for Canva.
+  const clean = !isCanvaDesign(meta);
   const imageMarkup = image
     ? `<img src="${image}" alt="${escapeHtml(meta.title)} source visual" />`
     : `<div class="synthetic"><i></i><i></i><i></i></div>`;
@@ -529,7 +607,9 @@ function renderCanvaDerivedCardPreview(meta: DesignMeta, surface: "web" | "ppt" 
       .style-card{position:relative;width:800px;height:500px;overflow:hidden;background:var(--surface);padding:22px;isolation:isolate}
       .stage{position:relative;width:100%;height:100%;overflow:hidden;border:1px solid color-mix(in srgb,var(--text) 18%,transparent);background:var(--secondary);box-shadow:0 18px 42px rgba(15,23,42,.16)}
       .stage img{display:block;width:100%;height:100%;object-fit:cover;object-position:center;filter:saturate(1.04) contrast(1.02)}
-      .stage:after{content:"";position:absolute;inset:auto 0 0;height:42%;background:linear-gradient(180deg,transparent,rgba(0,0,0,.42));opacity:.5;pointer-events:none}
+      .style-card.clean .stage img{object-position:top}
+      .style-card:not(.clean) .stage:after{content:"";position:absolute;inset:auto 0 0;height:42%;background:linear-gradient(180deg,transparent,rgba(0,0,0,.42));opacity:.5;pointer-events:none}
+      .src-chip{position:absolute;z-index:2;left:14px;top:14px;max-width:62%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid color-mix(in srgb,var(--text) 16%,transparent);border-radius:7px;background:color-mix(in srgb,var(--surface) 86%,transparent);backdrop-filter:blur(10px);padding:6px 9px;font-family:var(--mono),monospace;font-size:11px;font-weight:800;letter-spacing:.04em;color:var(--text);text-transform:lowercase}
       .synthetic{position:absolute;inset:0;background:var(--secondary)}.synthetic i{position:absolute;background:var(--primary);opacity:.88}.synthetic i:nth-child(1){left:8%;top:12%;width:42%;height:64%;border-radius:22px}.synthetic i:nth-child(2){right:9%;top:16%;width:22%;height:22%;border-radius:999px;background:var(--text)}.synthetic i:nth-child(3){right:12%;bottom:18%;width:34%;height:8%;border-radius:999px}
       .top{position:absolute;z-index:2;left:22px;right:22px;top:22px;display:flex;justify-content:space-between;gap:20px;align-items:center;color:#fff;text-shadow:0 1px 18px rgba(0,0,0,.38);font-family:var(--mono),monospace;font-size:12px;font-weight:850}
       .top span:first-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-transform:lowercase}
@@ -541,16 +621,18 @@ function renderCanvaDerivedCardPreview(meta: DesignMeta, surface: "web" | "ppt" 
     </style>
   </head>
   <body>
-    <main class="style-card ${surface}">
+    <main class="style-card ${surface}${clean ? " clean" : ""}">
       <section class="stage">
         ${imageMarkup}
-        <div class="top"><span>${escapeHtml(sourceLabel)}</span><span>01</span></div>
+        ${clean
+          ? `<div class="src-chip">${escapeHtml(sourceLabel)}</div>`
+          : `<div class="top"><span>${escapeHtml(sourceLabel)}</span><span>01</span></div>`}
       </section>
-      <section class="caption">
+      ${clean ? "" : `<section class="caption">
         <h1>${escapeHtml(title)}</h1>
         <div class="tag">${escapeHtml(label)}</div>
       </section>
-      <div class="mode">${escapeHtml(modeLabel)}</div>
+      <div class="mode">${escapeHtml(modeLabel)}</div>`}
     </main>
   </body>
 </html>`;
@@ -698,7 +780,7 @@ function renderCardSwatches(meta: DesignMeta): string {
 }
 
 export function renderCardPreview(meta: DesignMeta, surface: "web" | "ppt" | "library" = "library") {
-  if (isCanvaDesign(meta)) return renderCanvaDerivedCardPreview(meta, surface);
+  if (isCanvaDesign(meta) || hasStrongScreenshot(meta)) return renderScreenshotLedCardPreview(meta, surface);
 
   const { typography } = meta.tokens;
   const displayFont = cssFontFamily(meta.profile?.typographyRoles?.display || typography.families.display, "Georgia, 'Times New Roman', serif");
@@ -733,11 +815,11 @@ export function renderCardPreview(meta: DesignMeta, surface: "web" | "ppt" | "li
       *{box-sizing:border-box} html,body{width:100%;height:100%;overflow:hidden} body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body),system-ui,sans-serif}
       @keyframes dv-card-settle{from{opacity:0;transform:translate3d(0,18px,0) scale(.985);filter:blur(3px)}to{opacity:1;transform:translate3d(0,0,0) scale(1);filter:blur(0)}}
       @keyframes dv-card-scan{from{transform:scaleX(0);opacity:.3}to{transform:scaleX(1);opacity:1}}
-      .card{position:relative;display:grid;height:100%;min-height:0;overflow:hidden;padding:20px;background:radial-gradient(circle at 82% 10%, color-mix(in srgb,var(--primary) 26%, transparent), transparent 30%),linear-gradient(135deg,color-mix(in srgb,var(--bg) 88%, white),var(--bg));}
+      .card{position:relative;display:grid;height:100%;min-height:0;overflow:hidden;padding:20px;background:linear-gradient(135deg,color-mix(in srgb,var(--bg) 94%, white),var(--bg));}
       .shell{position:relative;display:grid;height:100%;min-height:0;grid-template-rows:auto minmax(0,1fr) auto;gap:14px;overflow:hidden;border:1px solid var(--line);border-radius:22px;background:color-mix(in srgb,var(--stage) 88%, transparent);box-shadow:0 28px 70px rgba(15,23,42,.16);animation:dv-card-settle var(--motion-duration) var(--motion-ease) both}
-      .shell:after{content:"";position:absolute;left:16px;right:16px;bottom:45px;height:2px;background:linear-gradient(90deg,var(--primary),transparent);transform-origin:left;animation:dv-card-scan var(--motion-duration) var(--motion-ease) both}
-      .meta{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px 0}.brand{min-width:0;font-size:13px;font-weight:800}.brand span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand small{display:block;margin-top:3px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase}.chips{display:flex;gap:6px;min-width:0}.chips span{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--line);border-radius:999px;padding:6px 9px;background:color-mix(in srgb,var(--primary) 12%, transparent);color:var(--text);font-size:10px;font-weight:750}
-      .specimen{min-height:0;padding:0 16px 0}.caption{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:end;border-top:1px solid var(--line);padding:12px 16px 14px;color:var(--muted);font-size:11px;line-height:1.35}.caption b{display:block;color:var(--text);font-size:12px}.caption span{display:block;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.swatches{display:flex;gap:6px}.swatches i{width:28px;height:18px;border:1px solid var(--line);border-radius:5px}.swatches i:nth-child(1){background:var(--bg)}.swatches i:nth-child(2){background:var(--text)}.swatches i:nth-child(3){background:var(--primary)}.swatches i:nth-child(4){background:var(--secondary)}
+      .shell:after{content:"";position:absolute;left:16px;right:16px;bottom:45px;height:1px;background:var(--line);opacity:.55;transform-origin:left;animation:dv-card-scan var(--motion-duration) var(--motion-ease) both}
+      .meta{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px 0}.brand{min-width:0;font-size:13px;font-weight:800}.brand span{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.brand small{display:block;margin-top:3px;color:var(--muted);font-size:10px;font-weight:700;text-transform:uppercase}.chips{display:flex;gap:6px;min-width:0}.chips span{max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;border:1px solid var(--line);border-radius:999px;padding:5px 8px;background:transparent;color:var(--muted);font-size:9px;font-weight:650}
+      .specimen{min-height:0;padding:0 16px 0}.caption{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px;align-items:end;border-top:1px solid var(--line);padding:12px 16px 14px;color:var(--muted);font-size:11px;line-height:1.35}.caption b{display:block;color:var(--text);font-size:12px}.caption span{display:block;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.swatches{display:flex;gap:4px;opacity:.85}.swatches i{width:20px;height:12px;border:1px solid var(--line);border-radius:4px}.swatches i:nth-child(1){background:var(--bg)}.swatches i:nth-child(2){background:var(--text)}.swatches i:nth-child(3){background:var(--primary)}.swatches i:nth-child(4){background:var(--secondary)}
       h1{margin:0;font-family:var(--display),var(--body),system-ui,sans-serif;font-size:36px;line-height:.98;max-width:820px;text-wrap:balance} p{margin:0;color:var(--muted);font-size:13px;line-height:1.45}
       .wallet-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px}.wallet-nav b{font-size:20px}.wallet-nav span{border-radius:999px;background:var(--primary);color:var(--bg);padding:9px 18px;font-size:12px;font-weight:800}.wallet-stage{position:relative;display:grid;height:100%;min-height:0;place-items:center;overflow:hidden;border-radius:26px;background:#101010;color:#fff}.wallet-stage i{position:absolute;inset:0 auto 0 0;width:28%;background:linear-gradient(90deg,var(--secondary),transparent)}.wallet-stage div{position:relative;max-width:70%;text-align:center}.wallet-stage small,.mag-copy small,.editorial small{display:block;margin-bottom:8px;color:color-mix(in srgb,var(--primary) 72%, white);font-size:11px;font-weight:800;text-transform:uppercase}
       .chrome{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px;border-radius:16px;border:1px solid var(--line);background:color-mix(in srgb,var(--stage) 88%, var(--primary));padding:10px 12px}.chrome b,.chrome span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.chrome b{font-size:16px}.chrome span{border-radius:999px;background:color-mix(in srgb,var(--primary) 16%, transparent);padding:6px 9px;color:var(--muted);font-size:10px;font-weight:800}
@@ -775,7 +857,7 @@ export function renderWebPreview(meta: DesignMeta) {
 }
 
 function renderWebPreviewBody(meta: DesignMeta) {
-  if (isCanvaDesign(meta)) return renderCanvaDerivedWebPreview(meta);
+  if (isCanvaDesign(meta) || hasStrongScreenshot(meta)) return renderScreenshotLedWebPreview(meta);
 
   const previewStyle = inferPreviewStyle(meta);
   if (previewStyle === "campaign") return renderCampaignWebPreview(meta);
@@ -836,11 +918,11 @@ function renderWebPreviewBody(meta: DesignMeta) {
 </html>`;
 }
 
-function renderCanvaDerivedWebPreview(meta: DesignMeta) {
+function renderScreenshotLedWebPreview(meta: DesignMeta) {
   const { typography } = meta.tokens;
   const colors = semanticColors(meta);
   const images = sourcePreviewImages(meta, 4);
-  const image = images[0] || firstPreviewImage(meta);
+  const image = bestScreenshotAsset(meta)?.path || images[0] || firstPreviewImage(meta);
   const title = sourceDisplayTitle(meta);
   const label = sourceUsageLabel(meta);
   const metaLabel = sourceMetaLabel(meta);
@@ -891,13 +973,13 @@ function renderCanvaDerivedWebPreview(meta: DesignMeta) {
 }
 
 function renderCampaignWebPreview(meta: DesignMeta) {
-  return renderCanvaDerivedWebPreview(meta);
+  return renderScreenshotLedWebPreview(meta);
 }
 
 function renderDarkEventWebPreview(meta: DesignMeta) {
   const { typography } = meta.tokens;
   const heroHeading = firstHeading(meta);
-  const [sessionOne = "Opening Keynote", sessionTwo = "Building AI agents that generate full Next.js Apps", sessionThree = "Identity-First Security for the Autonomous Future"] = secondaryHeadings(meta);
+  const [sessionOne = "Session one", sessionTwo = "Session two", sessionThree = "Session three"] = secondaryHeadings(meta);
 
   return `<!doctype html>
 <html lang="en">
@@ -938,7 +1020,7 @@ function renderDarkEventWebPreview(meta: DesignMeta) {
   </head>
   <body>
     <main>
-      <nav class="nav" aria-label="Preview navigation"><div><a>Speakers</a><a>Schedule</a><a>FAQ</a></div><strong>Ship</strong><div><a>Get a ticket</a><a>Apply</a></div></nav>
+      <nav class="nav" aria-label="Preview navigation"><div><a>Speakers</a><a>Schedule</a><a>FAQ</a></div><strong>${escapeHtml(meta.sourceHost)}</strong><div><a>Get a ticket</a><a>Apply</a></div></nav>
       <div class="constellation" aria-hidden="true">
         <div class="row"><span class="node"></span></div>
         <div class="row"><span class="node"></span><span class="node"></span><span class="node"></span></div>
@@ -954,7 +1036,7 @@ function renderDarkEventWebPreview(meta: DesignMeta) {
       </section>
       <section class="section">
         <h2>Featured speakers</h2>
-        <div class="speaker"><div class="speaker-list"><div><b>Guillermo Rauch</b>Vercel / CEO</div><div><b>Product leaders</b>AI platform and developer experience</div><div><b>Security voices</b>Identity and autonomous agents</div></div><div class="portrait"></div></div>
+        <div class="speaker"><div class="speaker-list"><div><b>Featured speaker</b>${escapeHtml(meta.sourceHost)}</div><div><b>Program lead</b>Source-derived session lineup</div><div><b>Session host</b>Source-derived program metadata</div></div><div class="portrait"></div></div>
       </section>
       <section class="section">
         <h2>Featured sessions</h2>
@@ -964,11 +1046,11 @@ function renderDarkEventWebPreview(meta: DesignMeta) {
           <article class="session"><h3>${escapeHtml(sessionThree)}</h3><p>Autonomous product workflows presented with high contrast and restrained motion.</p></article>
         </div>
       </section>
-      <section class="section"><h2>FAQ</h2><div class="faq"><div><span>What is Ship?</span><span>+</span></div><div><span>How long does it take to hear back after I request a ticket?</span><span>+</span></div><div><span>Will this be live-streamed?</span><span>+</span></div><div><span>When will the full agenda be announced?</span><span>+</span></div></div></section>
+      <section class="section"><h2>FAQ</h2><div class="faq"><div><span>What is this event?</span><span>+</span></div><div><span>How long does it take to hear back after I request a ticket?</span><span>+</span></div><div><span>Will this be live-streamed?</span><span>+</span></div><div><span>When will the full agenda be announced?</span><span>+</span></div></div></section>
       <div class="bars" aria-hidden="true"><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span><span class="bar"></span></div>
-      <section class="section"><h2>Sponsors</h2><div class="sponsors"><div>Contentstack</div><div>Vercel</div><div>Partners</div></div></section>
-      <section class="next"><h2>Next stops:</h2><div class="cities"><div>London, 17.06</div><div>Berlin, 25.06</div><div>Sydney, 30.07</div><div>San Francisco, 15.10</div></div></section>
-      <div class="footer">▲ Vercel</div>
+      <section class="section"><h2>Sponsors</h2><div class="sponsors"><div>Sponsor</div><div>Sponsor</div><div>Partner</div></div></section>
+      <section class="next"><h2>Next stops:</h2><div class="cities"><div>City one</div><div>City two</div><div>City three</div><div>City four</div></div></section>
+      <div class="footer">${escapeHtml(meta.sourceHost)}</div>
     </main>
   </body>
 </html>`;
@@ -1180,11 +1262,11 @@ function renderConsumerWalletWebPreview(meta: DesignMeta) {
       .ghost-mark:before{left:15px}.ghost-mark:after{right:13px}
       .actions{display:flex;align-items:center;gap:12px}.download{border:0;border-radius:999px;background:var(--accent);color:var(--ink);padding:16px 34px;font-weight:750;font-size:17px}.menu{width:58px;height:58px;border-radius:999px;background:#fff;display:grid;place-items:center;border:0}.menu span,.menu:before,.menu:after{content:"";display:block;width:24px;height:2px;background:var(--ink);border-radius:999px}.menu{gap:5px}
       .stage{position:relative;min-height:clamp(620px,74vh,920px);border-radius:34px;overflow:hidden;background:
-        radial-gradient(circle at 70% 12%,rgba(171,159,242,.2),transparent 34%),
-        linear-gradient(90deg,rgba(130,65,22,.92) 0 19%,transparent 19%),
-        linear-gradient(180deg,#141414,#0d0d0d);box-shadow:0 28px 80px rgba(60,49,91,.18)}
+        radial-gradient(circle at 70% 12%,color-mix(in srgb,var(--accent) 24%,transparent),transparent 34%),
+        linear-gradient(90deg,color-mix(in srgb,var(--support) 82%,#000) 0 19%,transparent 19%),
+        linear-gradient(180deg,#141414,#0d0d0d);box-shadow:0 28px 80px rgba(15,23,42,.18)}
       .stage:before{content:"";position:absolute;inset:0;background:
-        linear-gradient(90deg,rgba(255,122,44,.6) 7%,transparent 8% 88%,rgba(88,255,201,.35) 90%,transparent 91%),
+        linear-gradient(90deg,color-mix(in srgb,var(--accent) 60%,transparent) 7%,transparent 8% 88%,color-mix(in srgb,var(--support) 35%,transparent) 90%,transparent 91%),
         radial-gradient(circle at 45% 44%,rgba(255,255,255,.06),transparent 28%);filter:blur(1px);opacity:.62}
       .stage:after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,transparent 0 55%,rgba(0,0,0,.42));}
       .hero{position:relative;z-index:2;min-height:inherit;display:grid;place-items:center;text-align:center;padding:clamp(44px,8vw,110px)}
@@ -1196,7 +1278,7 @@ function renderConsumerWalletWebPreview(meta: DesignMeta) {
   <body>
     <main>
       <nav>
-        <div class="brand"><span class="ghost-mark" aria-hidden="true"></span><span>${escapeHtml(brand)}</span></div>
+        <div class="brand"><span>${escapeHtml(brand)}</span></div>
         <div class="actions"><button class="download">${escapeHtml(compactLine(action, "Action", 18))}</button><button class="menu" aria-label="Menu"><span></span></button></div>
       </nav>
       <section class="stage">
@@ -1274,92 +1356,6 @@ function renderTypeSpecimenWebPreview(meta: DesignMeta) {
 </html>`;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function renderTypeSpecimenPptPreview(meta: DesignMeta) {
-  const { typography } = meta.tokens;
-  const colors = semanticColors(meta);
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(meta.title)} · Type Slide Preview</title>
-    <style>
-      :root{--bg:${colors.surface};--ink:${colors.text};--grid:${colors.secondary};--accent:${colors.primary};--magenta:#ff4cb2;--acid:#e8f80d;--blue:#6995ec}
-      *{box-sizing:border-box}
-      body{margin:0;background:#dcefe8;color:var(--ink);font-family:${typography.families.primary},system-ui,sans-serif}
-      main{min-height:100vh;padding:clamp(16px,4vw,40px);display:grid;gap:20px;align-content:start}
-      .slide{position:relative;width:100%;max-width:1120px;margin:0 auto;aspect-ratio:16/9;overflow:hidden;border:1.5px solid var(--ink);background:
-        linear-gradient(var(--grid) 1px,transparent 1px),
-        linear-gradient(90deg,var(--grid) 1px,transparent 1px),
-        var(--bg);background-size:72px 72px}
-      .cover{padding:38px;display:grid;align-content:space-between}.nav{display:flex;justify-content:space-between;font-weight:850}.tag{border:1.5px solid var(--ink);border-radius:999px;padding:10px 16px;background:var(--acid)}
-      h1{margin:0;font-size:clamp(74px,14vw,176px);line-height:.72;letter-spacing:0;text-transform:uppercase}.chips{display:flex;gap:10px}.chip{border:1.5px solid var(--ink);border-radius:999px;padding:8px 12px;background:var(--bg);font-weight:850}.chip:nth-child(2){background:var(--magenta);color:#000}.chip:nth-child(3){background:var(--blue);color:#000}
-      .module{padding:48px}.module h2{margin:0;font-size:70px;line-height:.9;letter-spacing:0}.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:34px}.card{min-height:230px;border:1.5px solid var(--ink);background:var(--bg);padding:20px}.card:nth-child(2){background:var(--accent)}.card:nth-child(3){background:var(--acid)}.card b{display:block;font-size:56px;line-height:.8;margin-bottom:24px}.card p{margin:0;font-weight:700;line-height:1.35}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="slide cover">
-        <div class="nav"><span>${escapeHtml(meta.sourceHost)}</span><span class="tag">Type Tester</span></div>
-        <h1>GT<br/>Mechanik</h1>
-        <div class="chips"><span class="chip">Mono</span><span class="chip">Semi</span><span class="chip">Poly</span></div>
-      </section>
-      <section class="slide module">
-        <h2>Variable font specimen grammar</h2>
-        <div class="grid">
-          <article class="card"><b>MCNK</b><p>Oversized letters are the primary layout object.</p></article>
-          <article class="card"><b>Axes</b><p>Controls expose TONE, weight, slant and style.</p></article>
-          <article class="card"><b>Glyphs</b><p>Inktraps, dots and iconic characters carry the brand.</p></article>
-        </div>
-      </section>
-    </main>
-  </body>
-</html>`;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function renderConsumerWalletPptPreview(meta: DesignMeta) {
-  const { typography } = meta.tokens;
-  const colors = semanticColors(meta);
-  const featureOne = "Trading";
-  const featureTwo = "Spend, Send, & Save";
-  const featureThree = "Security";
-  return `<!doctype html>
-<html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(meta.title)} · Wallet Slide Preview</title>
-    <style>
-      *{box-sizing:border-box}
-      body{margin:0;background:#ede9ff;color:${colors.text};font-family:${typography.families.primary},Inter,system-ui,sans-serif}
-      main{min-height:100vh;padding:clamp(16px,4vw,40px);display:grid;gap:20px;align-content:start}
-      .slide{position:relative;width:100%;max-width:1120px;margin:0 auto;aspect-ratio:16/9;overflow:hidden;border-radius:30px;background:${colors.surface};box-shadow:0 24px 70px rgba(60,49,91,.16)}
-      .cover{padding:44px;background:${colors.surface}}.nav{display:flex;justify-content:space-between;align-items:center}.brand{display:flex;align-items:center;gap:12px;font-size:30px;font-weight:850;letter-spacing:0}.ghost-mark{position:relative;display:inline-block;width:42px;height:28px;border-radius:56% 54% 62% 48%;background:${colors.text};transform:skewX(-14deg)}.ghost-mark:before,.ghost-mark:after{content:"";position:absolute;top:8px;width:5px;height:8px;border-radius:999px;background:${colors.surface};transform:skewX(14deg)}.ghost-mark:before{left:14px}.ghost-mark:after{right:12px}.pill{border-radius:999px;background:${colors.primary};padding:15px 30px;font-weight:760}.stage{position:absolute;left:44px;right:44px;bottom:44px;top:118px;border-radius:30px;background:linear-gradient(90deg,rgba(130,65,22,.92) 0 20%,transparent 20%),linear-gradient(180deg,#151515,#0d0d0d);display:grid;place-items:center;text-align:center;padding:clamp(30px,5vw,54px);overflow:hidden}.stage:before{content:"";position:absolute;inset:0;background:linear-gradient(90deg,rgba(255,122,44,.55) 8%,transparent 9% 88%,rgba(88,255,201,.32) 90%,transparent 91%);opacity:.65}.stage h1{position:relative;margin:0;max-width:740px;color:#fff;font-size:clamp(38px,5.2vw,62px);line-height:1.06;letter-spacing:0;text-wrap:balance}.stage small{position:relative;display:block;margin-bottom:18px;color:#f2efff;font-size:clamp(15px,1.6vw,19px)}
-      .module{padding:58px}.module h2{margin:0 0 28px;font-size:60px;line-height:1;letter-spacing:0}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}.card{min-height:250px;border-radius:28px;background:#fff;padding:26px;border:1px solid rgba(60,49,91,.08)}.card b{display:block;font-size:30px;line-height:1.05;letter-spacing:0;margin-bottom:16px}.card p{margin:0;color:color-mix(in srgb,${colors.text} 70%,#fff);line-height:1.5;font-size:17px}.swatch{position:absolute;right:34px;bottom:28px;display:flex;gap:8px}.swatch span{width:42px;height:42px;border-radius:50%}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="slide cover">
-        <div class="nav"><div class="brand"><span class="ghost-mark" aria-hidden="true"></span><span>phantom</span></div><div class="pill">Download</div></div>
-        <div class="stage"><div><small>${escapeHtml(firstHeading(meta))}</small><h1>${escapeHtml(meta.summary)}</h1></div></div>
-      </section>
-      <section class="slide module">
-        <h2>Consumer money app grammar</h2>
-        <div class="cards">
-          <article class="card"><b>${escapeHtml(featureOne)}</b><p>交易、发现和行动模块使用 app-like surface，不做企业仪表盘。</p></article>
-          <article class="card"><b>${escapeHtml(featureTwo)}</b><p>支付和转账组件保留大圆角、轻语气和触控友好节奏。</p></article>
-          <article class="card"><b>${escapeHtml(featureThree)}</b><p>安全表达要冷静可信，避免恐吓式金融合规视觉。</p></article>
-        </div>
-        <div class="swatch"><span style="background:${colors.primary}"></span><span style="background:${colors.secondary}"></span><span style="background:#111111"></span></div>
-      </section>
-    </main>
-  </body>
-</html>`;
-}
-
 function renderImmersiveWebPreview(meta: DesignMeta) {
   const { typography } = meta.tokens;
   const image = firstPreviewImage(meta);
@@ -1402,19 +1398,19 @@ function renderImmersiveWebPreview(meta: DesignMeta) {
       <div class="stage" aria-hidden="true"></div>
       <div class="hud">
         <div class="top">
-          <div class="brand">ROBERT BORGHESI <span class="rule"></span> LAB</div>
-          <div>ASTRO&nbsp;DITHER</div>
+          <div class="brand">${escapeHtml(sourceDisplayTitle(meta))} <span class="rule"></span> LAB</div>
+          <div>${escapeHtml(sourceUsageLabel(meta))}</div>
           <div>${escapeHtml(meta.sourceHost)}</div>
         </div>
-        <div class="center"><div class="gate">[:: CLICK TO ENTER + ENABLE AUDIO ::]</div></div>
-        <h1>ASTRO<br/>DITHER</h1>
+        <div class="center"><div class="gate">[:: CLICK TO ENTER ::]</div></div>
+        <h1>${escapeHtml(sourceDisplayTitle(meta))}</h1>
         <section class="panel">
-          <b>WebGPU & TSL experiment</b>
+          <b>Source-derived experiment</b>
           <p>${escapeHtml(meta.summary)}</p>
-          <b>Some random tech</b>
-          <p>Custom dither, fluid simulation, selective bloom, displacement, chromatic aberration and time-warped audio response.</p>
+          <b>Interaction &amp; motion</b>
+          <p>Source-observed motion, layering, and interaction translated into a derivative preview.</p>
           <div class="separator"></div>
-          <p><b>[signal. lost. beauty. found. digital. chaos.]</b></p>
+          <p><b>Source-derived immersive specimen</b></p>
         </section>
         <div class="bottom">
           <div>00:00:00</div>
@@ -1422,112 +1418,6 @@ function renderImmersiveWebPreview(meta: DesignMeta) {
           <div class="speed"><span>CLICK FOR SPEED</span><span class="rule"></span><span>1:00x</span></div>
         </div>
       </div>
-    </main>
-  </body>
-</html>`;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function renderImmersivePptPreview(meta: DesignMeta) {
-  const { typography } = meta.tokens;
-  const image = firstPreviewImage(meta);
-  const imageLayer = image ? `background-image:linear-gradient(180deg,rgba(0,0,0,.08),rgba(0,0,0,.72)),url('${image}');` : "";
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(meta.title)} · Slide Preview</title>
-    <style>
-      *{box-sizing:border-box}
-      body{margin:0;background:#050505;color:#fff;font-family:${typography.families.primary},Arial,sans-serif}
-      main{min-height:100vh;padding:clamp(16px,4vw,40px);display:grid;gap:18px;align-content:start}
-      .slide{position:relative;width:100%;max-width:1120px;margin:0 auto;aspect-ratio:16/9;overflow:hidden;border:1px solid rgba(255,255,255,.28);background:#080808}
-      .stage{position:absolute;inset:0;${imageLayer}background-size:cover;background-position:center;filter:contrast(1.1) saturate(.82)}
-      .stage:after{content:"";position:absolute;inset:0;background:repeating-linear-gradient(90deg,rgba(255,255,255,.12) 0 1px,transparent 1px 6px),repeating-linear-gradient(0deg,rgba(255,255,255,.08) 0 1px,transparent 1px 8px);mix-blend-mode:screen;opacity:.38}
-      .hud{position:absolute;inset:0;padding:clamp(24px,4vw,52px);display:grid;grid-template-rows:auto 1fr auto;font-weight:800;letter-spacing:-.08em;text-transform:uppercase}
-      .top,.bottom{display:grid;grid-template-columns:1fr auto 1fr;gap:20px;font-size:clamp(10px,1.4vw,17px)}.top div:last-child,.bottom div:last-child{text-align:right}
-      h1{align-self:center;justify-self:end;margin:0;max-width:70%;font-size:clamp(54px,12vw,150px);line-height:.76;text-align:right}
-      .gate{align-self:center;justify-self:start;background:rgba(0,0,0,.58);padding:10px 14px;font-size:clamp(13px,2vw,28px)}
-      .rule{display:inline-block;width:1px;height:1em;background:#fff;margin:0 12px;vertical-align:middle}.tiny{color:#d8d8d8}
-      .notes{width:100%;max-width:1120px;margin:0 auto;display:grid;grid-template-columns:1fr 1fr;gap:18px}
-      .note{border:1px solid rgba(255,255,255,.24);background:#0c0c0c;padding:22px;min-height:150px}.note b{display:block;margin-bottom:12px;text-transform:uppercase}.note p{margin:0;color:#cfcfcf;line-height:1.5}
-      @media(max-width:720px){.top,.bottom,.notes{grid-template-columns:1fr}.top div:last-child,.bottom div:last-child{text-align:left}h1{justify-self:start;text-align:left;max-width:100%}}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="slide">
-        <div class="stage"></div>
-        <div class="hud">
-          <div class="top"><div>ROBERT BORGHESI <span class="rule"></span> LAB</div><div>ASTRO DITHER</div><div>${escapeHtml(meta.sourceHost)}</div></div>
-          <div class="gate">[:: CLICK TO ENTER + ENABLE AUDIO ::]</div>
-          <h1>ASTRO<br/>DITHER</h1>
-          <div class="bottom"><div>00:00:00</div><div class="tiny">HOLD FOR SPEED</div><div>1:00x</div></div>
-        </div>
-      </section>
-      <section class="notes">
-        <div class="note"><b>Visual grammar</b><p>Full-bleed WebGPU stage, black/white HUD, dithered image field, sparse controls pinned to the grid edge.</p></div>
-        <div class="note"><b>Interaction model</b><p>Enter gate, audio enablement, speed control, learn-more side panel, and animated canvas state are all first-class components.</p></div>
-      </section>
-    </main>
-  </body>
-</html>`;
-}
-
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function renderDarkEventPptPreview(meta: DesignMeta) {
-  const { typography } = meta.tokens;
-  const heroHeading = firstHeading(meta);
-  const [sessionOne = "Opening Keynote", sessionTwo = "Building AI agents that generate full Next.js Apps"] = secondaryHeadings(meta);
-
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>${escapeHtml(meta.title)} · Slide Preview</title>
-    <style>
-      *{box-sizing:border-box}
-      body{margin:0;background:#000;color:#f7f7f7;font-family:${typography.families.primary},ui-monospace,SFMono-Regular,Menlo,monospace}
-      main{min-height:100vh;padding:clamp(16px,4vw,40px);display:grid;gap:18px;align-content:start}
-      .slide{width:100%;max-width:1120px;margin:0 auto;aspect-ratio:16/9;overflow:hidden;border:1px solid #252525;background:#000;position:relative}
-      .pad{padding:clamp(28px,5vw,64px)}
-      .nav{position:absolute;left:32px;right:32px;top:24px;display:flex;justify-content:space-between;font-size:10px;color:#dcdcdc}
-      .nodes{position:absolute;top:16%;left:50%;transform:translateX(-50%);display:grid;gap:11px;justify-items:center}.row{display:flex;gap:14px}.node{width:15px;height:12px;border:1px solid #777;font-size:6px;display:grid;place-items:center}.node::before{content:"AI"}
-      h1,h2{margin:0;font-family:${typography.families.display},${typography.families.primary},sans-serif;letter-spacing:-.075em;font-weight:500;text-wrap:balance}
-      h1{position:absolute;left:38px;bottom:44px;font-size:clamp(34px,7vw,82px);line-height:.9}
-      h2{font-size:clamp(26px,4.8vw,58px);line-height:.95;max-width:840px}
-      .ticket{position:absolute;right:42px;bottom:55px;background:#fff;color:#000;padding:18px 24px;font-size:14px;font-weight:650}
-      .label{font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:#aaa}
-      .grid{display:grid;grid-template-columns:.38fr minmax(0,1fr);gap:44px;height:100%;align-items:start}
-      .sessions{display:grid;gap:0}.session{display:grid;grid-template-columns:.42fr 1fr;gap:28px;padding:20px 0;border-bottom:1px solid #262626}.session b{font-size:16px}.session p{margin:0;color:#aaa;font-size:13px;line-height:1.55}
-      .cities{font-size:clamp(38px,7vw,84px);line-height:1.08;letter-spacing:-.08em}.cities div{border-bottom:1px solid #242424}
-      @media (max-width:680px){.grid{grid-template-columns:1fr;gap:24px}.ticket{left:38px;right:auto;bottom:28px}.nodes{top:12%}h1{bottom:96px}}
-    </style>
-  </head>
-  <body>
-    <main>
-      <section class="slide">
-        <div class="nav"><span>Speakers / Schedule / FAQ</span><strong>Ship</strong><span>Get a ticket</span></div>
-        <div class="nodes" aria-hidden="true">
-          <div class="row"><span class="node"></span></div>
-          <div class="row"><span class="node"></span><span class="node"></span><span class="node"></span></div>
-          <div class="row"><span class="node"></span><span class="node"></span><span class="node"></span><span class="node"></span></div>
-        </div>
-        <h1>${escapeHtml(heroHeading)}</h1>
-        <div class="ticket">Get your ticket -&gt;</div>
-      </section>
-      <section class="slide">
-        <div class="pad grid">
-          <div><div class="label">Featured sessions</div></div>
-          <div class="sessions">
-            <article class="session"><b>${escapeHtml(sessionOne)}</b><p>${escapeHtml(meta.summary)}</p></article>
-            <article class="session"><b>${escapeHtml(sessionTwo)}</b><p>AI agents, platform workflows, and developer velocity.</p></article>
-            <article class="session"><b>Next stops</b><div class="cities"><div>London, 17.06</div><div>Berlin, 25.06</div></div></article>
-          </div>
-        </div>
-      </section>
     </main>
   </body>
 </html>`;

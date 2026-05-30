@@ -645,7 +645,7 @@ function PptSlidePreview({
           <div className="aspect-video overflow-hidden rounded-[22px] bg-[#fffdf8] text-[#3c315b] shadow-sm" style={{ fontFamily: typography.primary }}>
             <div className="relative h-full w-full overflow-hidden p-5">
               <div className="flex items-center justify-between">
-                <div className="text-[18px] font-black tracking-[-0.08em]">phantom</div>
+                <div className="text-[18px] font-black tracking-[-0.08em]">{sourceHost}</div>
                 <div className="rounded-full bg-[#ab9ff2] px-4 py-1.5 text-[9px] font-bold">Download</div>
               </div>
               <div className="absolute bottom-5 left-5 right-5 top-16 overflow-hidden rounded-[24px] bg-[#111]">
@@ -658,7 +658,7 @@ function PptSlidePreview({
                     <h4 className="text-[29px] font-black leading-[1.02] tracking-[-0.075em] text-white">
                       {summary}
                     </h4>
-                    <div className="mx-auto mt-4 inline-flex rounded-full bg-[#e7e1ff] px-4 py-2 text-[9px] font-bold text-[#3c315b]">Download Phantom</div>
+                    <div className="mx-auto mt-4 inline-flex rounded-full bg-[#e7e1ff] px-4 py-2 text-[9px] font-bold text-[#3c315b]">Download</div>
                   </div>
                 </div>
               </div>
@@ -699,9 +699,7 @@ function PptSlidePreview({
               </div>
               <div>
                 <h4 className="text-[54px] font-black uppercase leading-[0.72]" style={{ fontFamily: typography.display }}>
-                  GT
-                  <br />
-                  Mechanik
+                  {sourceHost}
                 </h4>
                 <div className="mt-4 flex gap-2 text-[8px] font-black">
                   <span className="rounded-full border border-[#0b6c00] bg-[#f9f9f7] px-2 py-1">Mono</span>
@@ -743,17 +741,15 @@ function PptSlidePreview({
                 aria-hidden="true"
               />
               <div className="absolute left-4 right-4 top-3 grid grid-cols-3 text-[7px] font-bold uppercase tracking-[-0.05em] text-white">
-                <span>Robert Borghesi / Lab</span>
-                <span className="text-center">ASTRO DITHER</span>
+                <span>Lab</span>
+                <span className="text-center">Experiment</span>
                 <span className="text-right">{sourceHost}</span>
               </div>
               <div className="absolute left-6 top-1/2 -translate-y-1/2 bg-black/60 px-2.5 py-2 text-[9px] font-bold uppercase tracking-[-0.08em]">
                 [:: click to enter + enable audio ::]
               </div>
               <h4 className="absolute bottom-7 right-5 text-right text-[44px] font-black uppercase leading-[0.76] tracking-[-0.12em]" style={{ fontFamily: typography.display }}>
-                ASTRO
-                <br />
-                DITHER
+                {heroHeading}
               </h4>
               <div className="absolute bottom-3 left-4 right-4 grid grid-cols-3 text-[7px] font-bold uppercase tracking-[-0.05em] text-white">
                 <span>00:00:00</span>
@@ -786,7 +782,7 @@ function PptSlidePreview({
             <div className="relative h-full w-full overflow-hidden">
               <div className="absolute left-4 right-4 top-3 flex justify-between text-[7px] tracking-[0.12em] text-zinc-300">
                 <span>Speakers / Schedule / FAQ</span>
-                <span>Ship</span>
+                <span>{sourceHost}</span>
                 <span>Ticket</span>
               </div>
               <div className="absolute left-1/2 top-[18%] grid -translate-x-1/2 gap-1.5">

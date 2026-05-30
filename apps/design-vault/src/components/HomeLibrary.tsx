@@ -9,7 +9,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { ScaledPreviewFrame } from "@/components/ScaledPreviewFrame";
 import type { MySubmission, RegistryEntry } from "@/lib/community-client";
-import { effectiveDesignTags, normalizeTag, normalizeTags, semanticDesignTags, systemDesignTags } from "@/lib/tags";
+import { effectiveDesignTags, isBoilerplateArchetypeTag, normalizeTag, normalizeTags, semanticDesignTags, systemDesignTags } from "@/lib/tags";
+import { cleanDisplayTitle } from "@/lib/title";
 import type { DesignMeta, DesignSystemPackageType } from "@/lib/types";
 
 type PublishResult = {
@@ -492,7 +493,7 @@ function StyleMiniPreview({ compact = false, design }: { compact?: boolean; desi
   const body = design.profile?.typographyRoles.body ?? design.tokens.typography.families.primary;
   const kind = previewKind(design);
   const height = compact ? 72 : 132;
-  const title = design.title.replace(/ — .*/, "").replace(/:.*/, "");
+  const title = cleanDisplayTitle(design.profile?.systemName, design.title);
 
   if (design.sourceMode === "design-system-project" && design.packageManifest) {
     return <ProjectMiniPreview compact={compact} design={design} background={background} text={text} accent={accent} muted={muted} display={display} body={body} height={height} />;
@@ -524,7 +525,7 @@ function StyleMiniPreview({ compact = false, design }: { compact?: boolean; desi
           </div>
           <div className="min-w-0">
             <div className={`${compact ? "text-3xl" : "text-6xl"} font-black uppercase leading-[0.78]`} style={{ fontFamily: display }}>
-              GT
+              Aa
             </div>
             {!compact ? (
               <div className="mt-2 flex gap-1.5 text-[10px] font-black">
@@ -549,7 +550,7 @@ function StyleMiniPreview({ compact = false, design }: { compact?: boolean; desi
     return (
       <div className="overflow-hidden rounded-lg border border-line p-3" style={{ background, color: text, fontFamily: body, height }}>
         <div className="flex items-center justify-between">
-          <div className="text-sm font-black">phantom</div>
+          <div className="truncate text-sm font-black">{design.sourceHost}</div>
           <div className="rounded-full px-3 py-1 text-[10px] font-bold" style={{ background: accent }}>
             Download
           </div>
@@ -569,8 +570,8 @@ function StyleMiniPreview({ compact = false, design }: { compact?: boolean; desi
   if (kind === "dark-event") {
     return (
       <div className="overflow-hidden rounded-lg border border-zinc-800 bg-black p-3 text-white" style={{ fontFamily: body, height }}>
-        <div className="flex justify-between text-[9px] uppercase text-zinc-300">
-          <span>Ship</span>
+        <div className="flex justify-between gap-2 text-[9px] uppercase text-zinc-300">
+          <span className="truncate">{design.sourceHost}</span>
           <span>Ticket</span>
         </div>
         <div className="mt-4 grid place-items-center">
@@ -584,8 +585,8 @@ function StyleMiniPreview({ compact = false, design }: { compact?: boolean; desi
             ))}
           </div>
         </div>
-        <div className={`${compact ? "mt-2 text-xl" : "mt-4 text-3xl"} font-medium leading-none`} style={{ fontFamily: display }}>
-          Ship what&apos;s next
+        <div className={`${compact ? "mt-2 text-xl" : "mt-4 text-3xl"} line-clamp-2 font-medium leading-none`} style={{ fontFamily: display }}>
+          {title}
         </div>
       </div>
     );
@@ -601,13 +602,13 @@ function StyleMiniPreview({ compact = false, design }: { compact?: boolean; desi
           }}
           aria-hidden="true"
         />
-        <div className="relative flex justify-between text-[9px] font-bold uppercase">
+        <div className="relative flex justify-between gap-2 text-[9px] font-bold uppercase">
           <span>LAB</span>
-          <span>ASTRO</span>
+          <span className="truncate">{design.sourceHost}</span>
         </div>
         <div className="relative mt-7 inline-block bg-black/70 px-2 py-1 text-[10px] font-black uppercase">click to enter</div>
-        <div className={`${compact ? "text-2xl" : "text-4xl"} relative mt-2 text-right font-black uppercase leading-none`} style={{ fontFamily: display }}>
-          Dither
+        <div className={`${compact ? "text-2xl" : "text-4xl"} relative mt-2 line-clamp-2 text-right font-black uppercase leading-none`} style={{ fontFamily: display }}>
+          {title}
         </div>
       </div>
     );
@@ -905,7 +906,7 @@ function FacetRow({ label, options }: { label: string; options: FacetOption[] })
 }
 
 function LibraryTags({ compact = false, design }: { compact?: boolean; design: DesignMeta }) {
-  const [userTags, setUserTags] = useState<string[]>(() => normalizeTags(design.tags ?? []));
+  const [userTags, setUserTags] = useState<string[]>(() => normalizeTags(design.tags ?? []).filter((tag) => !isBoilerplateArchetypeTag(tag)));
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [status, setStatus] = useState<"idle" | "saving" | "error">("idle");
@@ -1763,7 +1764,7 @@ export function HomeLibrary({
                     return submission ? <SubmissionStatusBadge submission={submission} /> : null;
                   })()}
                 </div>
-                <h3 className="font-serif dv-two-line-title h-12 text-[19px] font-semibold leading-[1.18] text-foreground">{design.title}</h3>
+                <h3 className="font-serif dv-two-line-title h-12 text-[19px] font-semibold leading-[1.18] text-foreground">{cleanDisplayTitle(design.profile?.systemName, design.title)}</h3>
               </div>
 
               <div className="mt-4" aria-label="风格样张">
@@ -1803,7 +1804,7 @@ export function HomeLibrary({
             >
               <div className="min-w-0">
                 <div className="dv-eyebrow">{design.sourceHost}</div>
-                <div className="font-serif dv-two-line-title mt-1 h-10 text-[17px] font-semibold leading-tight text-foreground">{design.title}</div>
+                <div className="font-serif dv-two-line-title mt-1 h-10 text-[17px] font-semibold leading-tight text-foreground">{cleanDisplayTitle(design.profile?.systemName, design.title)}</div>
                 <div className="mt-1 line-clamp-1 text-sm text-muted">{design.summary}</div>
                 <LibraryTags compact design={design} />
               </div>

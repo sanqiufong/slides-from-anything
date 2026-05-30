@@ -2,7 +2,7 @@ import { buildModelRequestDiagnostics, chatCompletionsUrl, fetchModelEndpoint, m
 import { getModelRuntimeConfig, loadLocalModelEnv } from "./model-config";
 import { runCliCompletion } from "./cli-executor";
 import { normalizeHtmlPreview } from "./html-preview";
-import { renderCardPreview, renderPptPreview } from "./preview";
+import { assetEvidenceScore, hasStrongScreenshot, renderCardPreview, renderPptPreview } from "./preview";
 import { getModelConfig, modelResponseError } from "./synthesis";
 import { compileTokenStylesheet } from "./token-stylesheet";
 import type { DesignMeta } from "./types";
@@ -86,22 +86,6 @@ function positiveNumber(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-function assetEvidenceScore(asset: DesignMeta["assets"][number]) {
-  const corpus = `${asset.kind} ${asset.name} ${asset.path} ${asset.sourceUrl ?? ""}`.toLowerCase();
-  let score = 0;
-  if (asset.kind === "image") score += 40;
-  if (asset.kind === "logo") score += 20;
-  if (asset.kind === "svg") score += 8;
-  if (/hero|cover|main|lead|masthead|banner|poster|og-image|twitter-image|source-image/.test(corpus)) score += 80;
-  if (/visual-journey|rendered viewport|screenshot|scroll-y/.test(corpus)) score += 95;
-  if (/background|bg|inline-bg|css-image/.test(corpus)) score += 45;
-  if (/product|case|work|gallery|project|photo|image/.test(corpus)) score += 25;
-  if (/\.(?:webp|avif|jpe?g|png)(?:[?#]|$)/.test(corpus) || /\/_next\/image\?/.test(corpus)) score += 18;
-  if (/logo|brand|mark/.test(corpus)) score += asset.kind === "logo" ? 22 : -18;
-  if (/favicon|sprite|icon-|apple-touch|mask-icon|placeholder|loader|pixel|tracking/.test(corpus)) score -= 90;
-  return score;
-}
-
 function assetContext(meta: DesignMeta) {
   return meta.assets
     .map((asset, index) => ({ asset, index, score: assetEvidenceScore(asset) }))
@@ -180,6 +164,17 @@ export async function generateStyleCardPreview(meta: DesignMeta) {
       html: renderCardPreview(meta),
       mode: "fallback" as const,
       reason: "Canva imports render deterministic source-driven previews; model text is used for abstraction only, not for the visual card.",
+    };
+  }
+
+  // Prefer the real captured source screenshot when a strong one exists, rather
+  // than asking the model to re-compose a generic specimen. renderCardPreview
+  // routes strong-screenshot designs to the deterministic screenshot-led card.
+  if (hasStrongScreenshot(meta)) {
+    return {
+      html: renderCardPreview(meta, "library"),
+      mode: "fallback" as const,
+      reason: "Strong source screenshot present; rendering deterministic screenshot-led card instead of an LLM-composed specimen.",
     };
   }
 
@@ -539,6 +534,7 @@ Use objective layout constraints only to make the preview fit the fixed slide ca
         antiPatterns: meta.profile.antiPatterns,
         openSlideGuidance: meta.profile.openSlideGuidance,
         presentationStyle: meta.profile.presentationStyle,
+        motionChoreography: meta.profile.motionChoreography,
       },
       capabilities: meta.capabilities?.slice(0, 8),
       localAssets: assetContext(meta),
@@ -567,6 +563,9 @@ Use objective layout constraints only to make the preview fit the fixed slide ca
       "If accentPalette includes a 'hero-fill' or 'oversized-display-type' entry, AT LEAST one slide (typically title or image) must render that color as a large field — not as a small chip.",
       "Use only textMaterials and slidePlan for visible words. You may shorten text to fit; do not expand it into explanatory prose.",
       "Use componentMotionRecipes as executable animation guidance. Each generated deck should visibly apply at least one recipe as CSS animation, staged reveal, active-state choreography, or persistent chrome behavior.",
+      ...(meta.profile.motionChoreography
+        ? ["When designSystemContext.profile.motionChoreography is present, treat it as the deck-level motion plan: apply motionChoreography.entrance[] (in order, honoring each step's delay/duration/easing) as the slide-enter stagger for the most prominent regions, motionChoreography.pageTransition as the between-slide behavior, and keep every timing equal to the provided ms/easing values (which already resolve to tokens.primitive). This is narrative guidance layered above componentMotionRecipes — it must not contradict the per-component recipes or the @media (prefers-reduced-motion) settle rule."]
+        : []),
       "Translate source interaction into presentation language: hover becomes staged emphasis, sticky becomes persistent slide chrome, scroll/animation becomes slide-enter or masked reveal, tabs/accordion/dialog become before/after or active-state choreography.",
       "DO NOT use the deterministic Design Vault sample look: no default white dashboard, no default blue/red bars, no gray logo placeholder panels unless those are source-supported.",
       "Use the source's dominant background relationship first. If the source is black/full-bleed/oversized serif, the slides should inherit that relationship.",

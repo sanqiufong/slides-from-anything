@@ -151,6 +151,23 @@ function motionRecipeTable(recipes?: ComponentMotionRecipe[]) {
   return tableRows([["Component", "Trigger", "State pair", "Properties", "Timing", "Choreography", "PPT adapter", "Evidence"], ...rows]);
 }
 
+function motionChoreographySection(mc?: DesignSystemProfile["motionChoreography"]) {
+  if (!mc) return "";
+  const entrance = (mc.entrance ?? []).map(
+    (s) => `- ${s.target}: ${s.motion} · ${s.duration} · delay ${s.delay} · ${s.easing}`,
+  );
+  const page = mc.pageTransition
+    ? `- Page turn: ${mc.pageTransition.motion} · ${mc.pageTransition.duration} · ${mc.pageTransition.easing}${mc.pageTransition.stagger ? ` · stagger ${mc.pageTransition.stagger}` : ""}`
+    : "";
+  const body = [
+    mc.posture ? `- Posture: ${mc.posture}` : "",
+    ...entrance,
+    page,
+    ...bullet(mc.choreographyNotes ?? []).split("\n").filter(Boolean),
+  ].filter(Boolean).join("\n");
+  return `\n### Motion choreography (v1)\n\n${body || "- No deterministic choreography derived."}\n\n_Provenance: ${mc.provenance.method}, confidence ${mc.provenance.confidence}, sources: ${mc.provenance.sources.join(", ")}_\n`;
+}
+
 function responsiveTable(signals?: ResponsiveSignal[]) {
   const rows = (signals ?? []).slice(0, 10).map((signal) => [signal.breakpoint, signal.evidence, summarizeList(signal.affectedSelectors, "selector extraction pending")]);
   if (!rows.length) return "- No media-query evidence captured. Use conservative mobile-first stacking and verify manually.";
@@ -500,7 +517,7 @@ ${bullet(profile.interactionModel.motionNotes)}
 ### Component motion recipes
 
 ${motionRecipeTable(profile.componentMotionRecipes)}
-
+${motionChoreographySection(profile.motionChoreography)}
 - Use source-observed motion timing when available; otherwise keep transitions minimal and functional.
 - Motion should confirm state changes or spatial movement; do not use animation as decoration without source evidence.
 - Respect reduced motion for transforms, parallax, scale, and repeated ambient movement.

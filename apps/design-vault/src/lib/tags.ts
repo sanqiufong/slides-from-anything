@@ -28,6 +28,20 @@ export function normalizeTags(input: unknown): string[] {
   return tags;
 }
 
+/**
+ * Internal archetype classifications ("source-derived … system/profile") that
+ * synthesis emits when the model gave no distinctive archetype. They are
+ * redundant with the package-type facet and read as jargon, so they are kept
+ * out of the user-facing tag chips. Distinctive archetypes (e.g. "type foundry
+ * / variable font specimen") are preserved.
+ */
+export function isBoilerplateArchetypeTag(tag: string): boolean {
+  // Prefix match — the persisted tag is often truncated by MAX_TAG_LENGTH
+  // ("source-derived web style system" → "source-derived web style sys"), so
+  // matching the tail (system/profile) would miss it.
+  return /^source[- ]derived\b/i.test(tag.trim());
+}
+
 export function packageTypeTag(packageType?: DesignSystemPackageType) {
   if (packageType === "component-system") return "组件系统";
   if (packageType === "presentation-system") return "演示系统";
@@ -46,10 +60,11 @@ export function modeTag(mode: IngestMode) {
 
 export function systemDesignTags(design: TaggableDesign): string[] {
   const packageType = design.packageManifest?.packageType;
+  const archetype = design.profile?.archetype;
   const tags = [
     packageTypeTag(packageType),
     modeTag(design.sourceMode),
-    design.profile?.archetype,
+    archetype && !isBoilerplateArchetypeTag(archetype) ? archetype : undefined,
     ...(design.packageManifest?.secondaryTypes ?? []).map(packageTypeTag),
     ...(design.capabilities ?? []).slice(0, 5).map((capability) => capability.id),
   ];

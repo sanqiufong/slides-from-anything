@@ -2004,7 +2004,9 @@ export async function runIngestion(jobId: string) {
       sourceChain,
       status: "ready",
       summary: effectiveSummary,
-      tags: normalizeTags([packageTypeTag(), modeTag(job.mode), baseProfile.archetype]),
+      // archetype ("source-derived … system") is an internal classification —
+      // surfaced via the package-type facet, not stored as a jargon tag chip.
+      tags: normalizeTags([packageTypeTag(), modeTag(job.mode)]),
       createdAt,
       updatedAt: createdAt,
       designPath: designDocPath(slug),

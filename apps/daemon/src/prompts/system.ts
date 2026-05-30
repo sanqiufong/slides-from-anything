@@ -98,6 +98,15 @@ type ProjectMetadata = {
       brandSecondary?: string | null;
       background?: string | null;
       text?: string | null;
+      surfaceAlternate?: string | null;
+      surfaceDeep?: string | null;
+      accentPalette?: Array<{
+        hex?: string | null;
+        role?: string | null;
+        canonicalRole?: string | null;
+        coverage?: string | null;
+        evidence?: string | null;
+      }> | null;
     } | null;
     typographyRoles?: {
       display?: string | null;
@@ -378,8 +387,22 @@ function renderMetadataBlock(
           vault.colorRoles.text ? `text ${vault.colorRoles.text}` : null,
           vault.colorRoles.brandPrimary ? `primary ${vault.colorRoles.brandPrimary}` : null,
           vault.colorRoles.brandSecondary ? `secondary ${vault.colorRoles.brandSecondary}` : null,
+          vault.colorRoles.surfaceAlternate ? `altSurface ${vault.colorRoles.surfaceAlternate}` : null,
+          vault.colorRoles.surfaceDeep ? `deepSurface ${vault.colorRoles.surfaceDeep}` : null,
         ].filter(Boolean);
         if (roles.length > 0) lines.push(`- **vaultColorRoles**: ${roles.join(', ')}`);
+        if (Array.isArray(vault.colorRoles.accentPalette)) {
+          const palette = vault.colorRoles.accentPalette
+            .map((entry) => {
+              const hex = entry && typeof entry.hex === 'string' ? entry.hex.trim() : '';
+              if (!hex) return '';
+              const label = entry.canonicalRole || entry.role;
+              return label ? `${hex} (${label})` : hex;
+            })
+            .filter(Boolean)
+            .slice(0, 10);
+          if (palette.length > 0) lines.push(`- **vaultAccentPalette**: ${palette.join(', ')}`);
+        }
       }
       if (vault.typographyRoles) {
         const roles = [

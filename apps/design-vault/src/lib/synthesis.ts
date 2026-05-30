@@ -18,6 +18,7 @@ import {
 } from "./model-request";
 import { requiredPresentationSampleArchetypes, withRequiredPresentationSampleArchetypes } from "./presentation-samples";
 import { CANONICAL_ROLE_GUIDE, slugForPrimitive, toCanonicalRole } from "./role-taxonomy";
+import { buildMotionChoreography, motionChoreographyEnabled } from "./motion-choreography";
 
 export type ModelConfig = {
   baseUrl: string;
@@ -639,6 +640,142 @@ function normalizeAccentPalette(value: unknown): DesignSystemProfile["colorRoles
   return entries.length ? entries : undefined;
 }
 
+// Inlined hex helpers (synthesis → ingestion → synthesis would be circular, so
+// we keep small copies here per the same precedent as optionalHex above).
+function synthHexToRgb(hex: string): [number, number, number] | null {
+  let v = hex.trim().replace(/^#/, "").toLowerCase();
+  if (v.length === 3) v = v.split("").map((c) => c + c).join("");
+  if (v.length === 8) v = v.slice(0, 6);
+  if (v.length !== 6 || /[^0-9a-f]/.test(v)) return null;
+  return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+}
+
+function synthSaturation(hex: string): number {
+  const rgb = synthHexToRgb(hex);
+  if (!rgb) return 0;
+  const [r, g, b] = rgb.map((channel) => channel / 255);
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  return max === 0 ? 0 : (max - min) / max;
+}
+
+function synthLuminance(hex: string): number {
+  const rgb = synthHexToRgb(hex);
+  if (!rgb) return 0;
+  return (0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]) / 255;
+}
+
+/**
+ * Deterministic accent-palette floor. The model path used to be the ONLY
+ * source of colorRoles.accentPalette, so legacy/regenerated designs (which run
+ * the deterministic fallbackProfile, never the model) shipped an empty palette
+ * and dropped every saturated identity color beyond the 4 base slots. This
+ * builds a palette from rendered-journey dominant colors → CSS color
+ * candidates → token palette, keeps only saturated identity colors (excluding
+ * the background/text roles), and maps each to a canonical role so the token
+ * stylesheet can emit `--dv-color-role-*` aliases downstream.
+ */
+function buildDeterministicAccentPalette(
+  evidence: DesignEvidence | undefined,
+  colorRoles: { background?: string; text?: string },
+  tokens?: DesignTokens,
+): NonNullable<DesignSystemProfile["colorRoles"]["accentPalette"]> {
+  const HEX = /^#[0-9a-f]{3,8}$/i;
+  type Candidate = { hex: string; coverage?: number; role?: string; evidence?: string };
+  const candidates: Candidate[] = [];
+  const push = (value: unknown, extra: Omit<Candidate, "hex">) => {
+    if (typeof value !== "string") return;
+    const hex = value.trim().toLowerCase();
+    if (!HEX.test(hex)) return;
+    candidates.push({ hex, ...extra });
+  };
+  for (const dominant of evidence?.visualCrossCheck?.dominantColors ?? []) {
+    push(dominant.value, { coverage: dominant.coverage, role: dominant.roleHint, evidence: "rendered journey dominant field" });
+  }
+  for (const candidate of evidence?.colorCandidates ?? []) {
+    push(candidate.value, { coverage: candidate.coverage, evidence: candidate.source === "rendered" ? "rendered color candidate" : "css color candidate" });
+  }
+  if (tokens?.colors) {
+    for (const [name, value] of Object.entries(tokens.colors)) {
+      if (name === "surface" || name === "text" || name === "neutral") continue;
+      push(value, { role: name, evidence: "token palette" });
+    }
+  }
+  const background = (colorRoles.background ?? "").trim().toLowerCase();
+  const text = (colorRoles.text ?? "").trim().toLowerCase();
+  const seen = new Set<string>();
+  const filtered = candidates
+    .filter((candidate) => {
+      if (candidate.hex === background || candidate.hex === text) return false;
+      if (synthSaturation(candidate.hex) < 0.24) return false;
+      const lum = synthLuminance(candidate.hex);
+      if (lum < 0.06 || lum > 0.95) return false;
+      if (seen.has(candidate.hex)) return false;
+      seen.add(candidate.hex);
+      return true;
+    })
+    .sort((a, b) => (b.coverage ?? 0) - (a.coverage ?? 0));
+  return filtered.slice(0, 8).map((candidate, index) => {
+    const role = candidate.role?.trim() || (index === 0 ? "hero-fill" : index === 1 ? "panel-accent" : "decorative-marker");
+    return {
+      hex: candidate.hex,
+      role,
+      canonicalRole: toCanonicalRole(role),
+      coverage: typeof candidate.coverage === "number" ? `${Math.round(candidate.coverage * 100)}% rendered coverage` : undefined,
+      evidence: candidate.evidence,
+    };
+  });
+}
+
+/**
+ * Merge a preferred palette (model output) with the deterministic floor:
+ * preferred entries first, then backfill saturated colors the model missed.
+ * Dedupe by hex; cap so the card swatch strip and token stylesheet stay bounded.
+ */
+function mergeAccentPalettes(
+  preferred: DesignSystemProfile["colorRoles"]["accentPalette"],
+  floor: DesignSystemProfile["colorRoles"]["accentPalette"],
+  cap = 10,
+): DesignSystemProfile["colorRoles"]["accentPalette"] {
+  const out: NonNullable<DesignSystemProfile["colorRoles"]["accentPalette"]> = [];
+  const seen = new Set<string>();
+  for (const entry of [...(preferred ?? []), ...(floor ?? [])]) {
+    const key = entry.hex.trim().toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entry);
+    if (out.length >= cap) break;
+  }
+  return out.length ? out : undefined;
+}
+
+/**
+ * Hero-viewport override (v1). The top/load viewport is usually the best hero,
+ * but some sites open on a desaturated intro frame (e.g. a black dot-matrix
+ * splash) whose design substance only appears further down. When the load
+ * viewport carries NO saturated brand color but a later content viewport does,
+ * return that content viewport's path so previews lead with substance.
+ * Conservative — returns undefined (no override) in every other case, so it
+ * never moves a hero that already carries the brand color (e.g. Le Puzz yellow).
+ */
+function pickHeroViewport(evidence: DesignEvidence | undefined): string | undefined {
+  const steps = (evidence?.visualCrossCheck?.steps ?? [])
+    .filter((step) => step.action !== "hover" && typeof step.screenshotPath === "string")
+    .slice(0, 5);
+  if (steps.length < 2) return undefined;
+  const saturatedColorCount = (step: (typeof steps)[number]) =>
+    step.colorCandidates.filter((candidate) => {
+      const s = synthSaturation(candidate.value);
+      const l = synthLuminance(candidate.value);
+      return s > 0.25 && l > 0.08 && l < 0.95;
+    }).length;
+  if (saturatedColorCount(steps[0]) >= 1) return undefined;
+  for (let i = 1; i < steps.length; i += 1) {
+    if (saturatedColorCount(steps[i]) >= 1) return steps[i].screenshotPath;
+  }
+  return undefined;
+}
+
 function uniqueComponentSignatures(items: DesignSystemProfile["componentSignatures"]) {
   const seen = new Set<string>();
   const result: DesignSystemProfile["componentSignatures"] = [];
@@ -837,6 +974,19 @@ function normalizeModelProfile(parsed: DesignSystemProfile, fallback: DesignSyst
   const modelVisualSeed = resolvedVisualThesis !== fallback.visualThesis ? resolvedVisualThesis : "";
   const fallbackWithModelSeed = (fallbackText: string) => [modelVisualSeed, fallbackText].filter(Boolean).join(" ");
 
+  // v1 motion choreography (additive, flag-gated). Compute once and
+  // enumerate it explicitly in the strict-mode return below so it is never
+  // an AI-passthrough. When evidence is unavailable, prefer the choreography
+  // already derived on the fallback profile (Path 1) rather than
+  // synthesizing from a synthetic empty evidence. Flag off → undefined →
+  // strict object omits it → byte-identical to pre-feature output.
+  const normalizedTokens = normalizeProfileTokens(profile.tokens, profile, fallback, evidence);
+  const motionChoreography = motionChoreographyEnabled()
+    ? evidence
+      ? buildMotionChoreography(evidence, normalizedTokens, { componentSignatures, componentMotionRecipes })
+      : fallback.motionChoreography
+    : undefined;
+
   // Strict-mode merge: do NOT spread the raw `adaptedParsed` AI output
   // (which historically leaked hallucinated top-level fields like
   // `layoutCharacter`, `voice`, `name`, etc. through into profile.json).
@@ -865,6 +1015,7 @@ function normalizeModelProfile(parsed: DesignSystemProfile, fallback: DesignSyst
     },
     previewStrategy: {
       renderer: previewStrategy.renderer ?? fallback.previewStrategy!.renderer,
+      heroAsset: pickHeroViewport(evidence),
       rationale: nonEmptyString(previewStrategy.rationale, fallback.previewStrategy!.rationale),
       layoutDirectives: stringArray(previewStrategy.layoutDirectives, fallback.previewStrategy!.layoutDirectives),
       avoidDirectives: stringArray(previewStrategy.avoidDirectives, fallback.previewStrategy!.avoidDirectives),
@@ -880,7 +1031,10 @@ function normalizeModelProfile(parsed: DesignSystemProfile, fallback: DesignSyst
       // them as unknown fields.
       surfaceAlternate: optionalHex(colorRoles.surfaceAlternate, fallback.colorRoles.surfaceAlternate),
       surfaceDeep: optionalHex(colorRoles.surfaceDeep, fallback.colorRoles.surfaceDeep),
-      accentPalette: normalizeAccentPalette(colorRoles.accentPalette),
+      accentPalette: mergeAccentPalettes(
+        normalizeAccentPalette(colorRoles.accentPalette),
+        buildDeterministicAccentPalette(evidence, { background: colorRoles.background, text: colorRoles.text }, undefined),
+      ),
     },
     typographyRoles: {
       // W4 sanitize: reject prose descriptions like "custom oversized NOA
@@ -920,7 +1074,8 @@ function normalizeModelProfile(parsed: DesignSystemProfile, fallback: DesignSyst
       motionApproach: stringArray(openSlideGuidance.motionApproach, fallback.openSlideGuidance.motionApproach),
     },
     presentationStyle: normalizePresentationStyle(profile.presentationStyle, fallback.presentationStyle!),
-    tokens: normalizeProfileTokens(profile.tokens, profile, fallback, evidence),
+    tokens: normalizedTokens,
+    motionChoreography,
   };
 }
 
@@ -1525,6 +1680,7 @@ function fallbackProfile(evidence: DesignEvidence, tokens: DesignTokens): Design
     },
     previewStrategy: {
       renderer: "custom",
+      heroAsset: pickHeroViewport(evidence),
       rationale: "All import modes should generate previews from localized source evidence and the abstracted role map, not from a hardcoded aesthetic category.",
       layoutDirectives: [
         "Use the source visual, source title hierarchy, and observed color/type relationships as the preview scaffold.",
@@ -1550,6 +1706,7 @@ function fallbackProfile(evidence: DesignEvidence, tokens: DesignTokens): Design
         renderedColors.length ? `Rendered journey cross-check: ${renderedColors.join(", ")}.` : "Rendered journey color cross-check was not available for this import.",
         "Frequent colors may be background, text, state, decoration, or image content; downstream use must preserve the observed relationship, not the raw frequency.",
       ],
+      accentPalette: buildDeterministicAccentPalette(evidence, colorRoles, tokens),
     },
     typographyRoles: {
       display,
@@ -1665,6 +1822,10 @@ function fallbackProfile(evidence: DesignEvidence, tokens: DesignTokens): Design
   // bundle so downstream renderers can rely on the same code path whether
   // the AI ran or not.
   base.tokens = migrateLegacyProfileTokens(base, base, evidence);
+  if (motionChoreographyEnabled()) {
+    const mc = buildMotionChoreography(evidence, base.tokens, base);
+    if (mc) base.motionChoreography = mc;
+  }
   return base;
 }
 
