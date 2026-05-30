@@ -30,6 +30,19 @@ describe('Design Vault preview proxy', () => {
     );
     fs.writeFileSync(path.join(localRoot, 'assets', 'hero.png'), 'hero');
     fs.writeFileSync(path.join(localRoot, 'assets', 'bg.png'), 'bg');
+    // Persisted previews emit RELATIVE asset paths plus a <base href> that
+    // points at the standalone vault file route (which 404s on the daemon
+    // origin). This fixture guards that the daemon makes them absolute so the
+    // OpenPPT iframe can load the images.
+    const relRoot = path.join(designsRoot, 'relative-assets-card');
+    fs.mkdirSync(path.join(relRoot, 'previews'), { recursive: true });
+    fs.mkdirSync(path.join(relRoot, 'assets', 'visual-journey'), { recursive: true });
+    fs.writeFileSync(
+      path.join(relRoot, 'previews', 'card.html'),
+      `<head><base href="/api/designs/relative-assets-card/file/"></head><body><img src="assets/visual-journey/load.jpg"><div style="background-image:url('./assets/bg.png')"></div></body>`,
+    );
+    fs.writeFileSync(path.join(relRoot, 'assets', 'visual-journey', 'load.jpg'), 'load');
+    fs.writeFileSync(path.join(relRoot, 'assets', 'bg.png'), 'bg2');
     const started = await startServer({ port: 0, returnServer: true }) as {
       url: string;
       server: http.Server;
@@ -63,6 +76,23 @@ describe('Design Vault preview proxy', () => {
     const assetResponse = await realFetch(`${baseUrl}/api/vault/designs/community-local-card/asset?path=assets%2Fhero.png`);
     expect(assetResponse.status).toBe(200);
     expect(await assetResponse.text()).toBe('hero');
+  });
+
+  it('rewrites relative asset paths and strips <base> so iframe images resolve', async () => {
+    const response = await realFetch(`${baseUrl}/api/vault/designs/relative-assets-card/preview?kind=card`);
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain('/api/vault/designs/relative-assets-card/asset?path=assets%2Fvisual-journey%2Fload.jpg');
+    expect(body).toContain('/api/vault/designs/relative-assets-card/asset?path=assets%2Fbg.png');
+    // No leftover relative path (it would 404 in the OpenPPT iframe) and no
+    // broken <base href> pointing at a route that does not exist on the daemon.
+    expect(body).not.toContain('src="assets/');
+    expect(body).not.toMatch(/<base\b/i);
+
+    const assetResponse = await realFetch(`${baseUrl}/api/vault/designs/relative-assets-card/asset?path=assets%2Fvisual-journey%2Fload.jpg`);
+    expect(assetResponse.status).toBe(200);
+    expect(await assetResponse.text()).toBe('load');
   });
 
   it('forwards card preview kind and library surface to external Design Vault', async () => {

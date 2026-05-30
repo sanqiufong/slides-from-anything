@@ -1701,16 +1701,31 @@ function localVaultPreviewPath(slug, kind) {
 
 function rewriteVaultPreviewHtml(html, slug) {
   const targetSlug = cleanString(slug);
-  return String(html).replace(
-    /(["'(])\/api\/designs\/([^/"')]+)\/asset\/([^"')\s]+)/g,
-    (_match, quote, rawSlug, rawAssetPath) => {
-      const assetPathPart = decodeURIComponentSafe(String(rawAssetPath)).split(/[?#]/)[0]?.replace(/^\/+/, '') || '';
-      const assetPath = assetPathPart.startsWith('assets/')
-        ? assetPathPart
-        : `assets/${assetPathPart}`;
-      return `${quote}/api/vault/designs/${encodeURIComponent(targetSlug || cleanString(rawSlug))}/asset?path=${encodeURIComponent(assetPath)}`;
-    },
+  const toAsset = (rawAssetPath: string, fromSlug?: string) => {
+    const part = decodeURIComponentSafe(String(rawAssetPath)).split(/[?#]/)[0]?.replace(/^\/+/, '') || '';
+    const assetPath = part.startsWith('assets/') ? part : `assets/${part}`;
+    const useSlug = targetSlug || cleanString(fromSlug || '');
+    return `/api/vault/designs/${encodeURIComponent(useSlug)}/asset?path=${encodeURIComponent(assetPath)}`;
+  };
+  let out = String(html);
+  // The standalone vault injects `<base href="/api/designs/<slug>/file/">` at
+  // serve time. That route does not exist on the daemon origin, so leaving the
+  // base tag would break every relative asset path inside the OpenPPT iframe.
+  // Drop it; the relative-path rewrite below makes every asset absolute.
+  out = out.replace(/<base\b[^>]*>/gi, '');
+  // Absolute standalone asset/file URLs → daemon asset endpoint.
+  out = out.replace(
+    /(["'(])\/api\/designs\/([^/"')]+)\/(?:asset|file)\/([^"')\s]+)/g,
+    (_match, quote, rawSlug, rawAssetPath) => `${quote}${toAsset(rawAssetPath, rawSlug)}`,
   );
+  // Relative asset references (src/href="assets/…", url('assets/…'), "./assets/…")
+  // that the persisted preview HTML emits without a base href. This is what made
+  // OpenPPT vault-tab preview images 404 in the iframe.
+  out = out.replace(
+    /((?:src|href)\s*=\s*["']|url\(\s*["']?)(?:\.?\/)?(assets\/[^"')?#\s]+)/gi,
+    (_match, prefix, rawAssetPath) => `${prefix}${toAsset(rawAssetPath)}`,
+  );
+  return out;
 }
 
 function decodeURIComponentSafe(value) {
