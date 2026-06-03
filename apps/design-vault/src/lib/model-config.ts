@@ -125,18 +125,89 @@ type AgentDef = {
 
 const DEFAULT_MODEL: LocalModelOption = { id: "default", label: "Default" };
 
+const CLAUDE_CODE_MODEL_OPTIONS: LocalModelOption[] = [
+  DEFAULT_MODEL,
+  { id: "best", label: "Best" },
+  { id: "claude-opus-4-8", label: "Opus 4.8" },
+  { id: "claude-opus-4-8[1m]", label: "Opus 4.8 1M" },
+  { id: "claude-opus-4-7", label: "Opus 4.7" },
+  { id: "claude-opus-4-7[1m]", label: "Opus 4.7 1M" },
+  { id: "claude-opus-4-6", label: "Opus 4.6" },
+  { id: "claude-opus-4-6[1m]", label: "Opus 4.6 1M" },
+  { id: "claude-sonnet-4-6", label: "Sonnet 4.6" },
+  { id: "claude-sonnet-4-6[1m]", label: "Sonnet 4.6 1M" },
+  { id: "claude-sonnet-4-5", label: "Sonnet 4.5" },
+  { id: "claude-haiku-4-5", label: "Haiku 4.5" },
+  { id: "sonnet", label: "Sonnet" },
+  { id: "opus", label: "Opus" },
+  { id: "haiku", label: "Haiku" },
+  { id: "sonnet[1m]", label: "Sonnet 1M" },
+  { id: "opus[1m]", label: "Opus 1M" },
+  { id: "opusplan", label: "Opus Plan" },
+];
+
+function labelClaudeCodeModel(id: string) {
+  if (id === process.env.ANTHROPIC_CUSTOM_MODEL_OPTION && process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME) {
+    return process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME;
+  }
+  return id
+    .replace(/^claude-/, "")
+    .replace(/\[1m\]$/i, " 1M")
+    .split("-")
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(" ");
+}
+
+function dedupeModelOptions(models: LocalModelOption[]) {
+  const seen = new Set<string>();
+  const out: LocalModelOption[] = [];
+  for (const model of models) {
+    if (!model.id || seen.has(model.id)) continue;
+    seen.add(model.id);
+    out.push(model);
+  }
+  return out;
+}
+
+function claudeCodeEnvModels() {
+  const candidates = [
+    process.env.ANTHROPIC_MODEL,
+    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    process.env.CLAUDE_CODE_SUBAGENT_MODEL,
+    process.env.ANTHROPIC_CUSTOM_MODEL_OPTION,
+  ];
+
+  return candidates
+    .map((value) => value?.trim())
+    .filter((value): value is string => Boolean(value && value !== "inherit"))
+    .map((id) => ({ id, label: labelClaudeCodeModel(id) }));
+}
+
+function parseClaudeCodeHelpModels(stdout: string) {
+  const ids = new Set<string>();
+  const matches = stdout.matchAll(/\bclaude-(?:opus|sonnet|haiku)-[A-Za-z0-9-]+(?:\[1m\])?\b/g);
+  for (const match of matches) ids.add(match[0]);
+  return dedupeModelOptions([
+    ...CLAUDE_CODE_MODEL_OPTIONS,
+    ...Array.from(ids).map((id) => ({ id, label: labelClaudeCodeModel(id) })),
+    ...claudeCodeEnvModels(),
+  ]);
+}
+
 const AGENT_DEFS: AgentDef[] = [
   {
     id: "claude",
     name: "Claude Code",
     bin: "claude",
     versionArgs: ["--version"],
-    fallbackModels: [
-      DEFAULT_MODEL,
-      { id: "sonnet", label: "Sonnet" },
-      { id: "opus", label: "Opus" },
-      { id: "haiku", label: "Haiku" },
-    ],
+    listModels: {
+      args: ["--help"],
+      timeoutMs: 5000,
+      parse: parseClaudeCodeHelpModels,
+    },
+    fallbackModels: dedupeModelOptions([...CLAUDE_CODE_MODEL_OPTIONS, ...claudeCodeEnvModels()]),
   },
   {
     id: "codex",

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildCodexImageProxyCurl,
   codexImageProxyAuthLabel,
+  codexImageProxyGenerationLabel,
   isValidApiBaseUrl,
   switchApiProtocolConfig,
   updateCurrentApiProtocolConfig,
@@ -174,8 +175,43 @@ describe('SettingsDialog Codex Image Proxy helpers', () => {
       backend: {
         forceCodexBackend: false,
         useResponsesTool: false,
-        responsesModel: 'gpt-5.2',
+        responsesModel: 'gpt-5.5',
+        responsesModelSource: 'codex-config',
+      },
+      generation: {
+        canGenerate: true,
+        state: 'ready',
+        message: 'Codex proxy image generation is configured.',
+        action: 'Restart the app if generation fails.',
       },
     })).toBe('Codex OAuth');
+  });
+
+  it('labels credential-only proxy status as needing repair', () => {
+    expect(codexImageProxyGenerationLabel({
+      enabled: true,
+      baseUrl: 'http://127.0.0.1:7456/v1',
+      endpoint: '/images/generations',
+      defaultModel: 'gpt-image-2',
+      auth: {
+        configured: true,
+        source: 'oauth-codex',
+        accountIdConfigured: false,
+        accountIdTail: '',
+      },
+      proxyKey: { enabled: false, env: 'OD_CODEX_IMAGE_PROXY_KEY' },
+      backend: {
+        forceCodexBackend: false,
+        useResponsesTool: false,
+        responsesModel: 'gpt-5.5',
+        responsesModelSource: 'codex-config',
+      },
+      generation: {
+        canGenerate: false,
+        state: 'credential-only',
+        message: 'Codex OAuth is present, but the account id is missing.',
+        action: 'Restart the app, then run Codex login again.',
+      },
+    })).toBe('Repair needed');
   });
 });

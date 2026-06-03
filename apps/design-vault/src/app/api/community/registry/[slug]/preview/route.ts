@@ -18,7 +18,12 @@ export async function GET(request: Request, context: { params: Promise<{ slug: s
   if (!auth?.baseUrl) return placeholder("未配置社区 server");
   const url = new URL(request.url);
   const kind = url.searchParams.get("kind") ?? "card";
-  const upstreamUrl = `${normalizeBaseUrl(auth.baseUrl)}/api/registry/${encodeURIComponent(slug)}/preview?kind=${encodeURIComponent(kind)}`;
+  const upstreamUrl = new URL(`/api/registry/${encodeURIComponent(slug)}/preview`, normalizeBaseUrl(auth.baseUrl));
+  upstreamUrl.searchParams.set("kind", kind);
+  for (const param of ["slide", "surface"]) {
+    const value = url.searchParams.get(param);
+    if (value) upstreamUrl.searchParams.set(param, value);
+  }
   const upstream = await fetch(upstreamUrl, { cache: "no-store" }).catch(() => null);
   if (!upstream) return placeholder("无法连接社区 server");
   const html = await upstream.text();

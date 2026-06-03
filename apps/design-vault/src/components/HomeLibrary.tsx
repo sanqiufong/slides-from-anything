@@ -1955,11 +1955,13 @@ export function HomeLibrary({
                 </div>
                 <h4 className="font-serif dv-two-line-title h-12 text-[17px] font-semibold leading-[1.18] text-foreground">{entry.title}</h4>
                 <ScaledPreviewFrame
-                  ariaLabel={`${entry.title} 社区预览`}
+                  ariaLabel={`${entry.title} PPT 首页`}
+                  canvasWidth={1120}
+                  canvasHeight={630}
                   className="w-full rounded-lg border border-line shadow-inner"
-                  src={`/api/community/registry/${entry.slug}/preview?kind=card`}
+                  src={`/api/community/registry/${entry.slug}/preview?kind=ppt&slide=title`}
                   tabIndex={-1}
-                  title={`${entry.title} 社区预览`}
+                  title={`${entry.title} PPT 首页`}
                 />
                 <p className="line-clamp-3 text-sm leading-6 text-muted">{entry.summary}</p>
                 <div className="mt-auto flex items-center justify-between gap-2 border-t border-line pt-3 text-xs text-muted">

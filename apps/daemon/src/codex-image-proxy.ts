@@ -1,10 +1,13 @@
 import type { Request, Response } from 'express';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
 import { resolveOpenAIOAuthCredential } from './media-config.js';
 
 const DEFAULT_IMAGE_MODEL = 'gpt-image-2';
 const OPENAI_IMAGES_URL = 'https://api.openai.com/v1/images/generations';
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
-const DEFAULT_CODEX_RESPONSES_MODEL = 'gpt-5.2';
+const DEFAULT_CODEX_RESPONSES_MODEL = 'gpt-5.5';
 
 type FetchLike = typeof fetch;
 
@@ -27,6 +30,13 @@ export type CodexImageProxyStatus = {
     forceCodexBackend: boolean;
     useResponsesTool: boolean;
     responsesModel: string;
+    responsesModelSource: 'env' | 'codex-config' | 'default';
+  };
+  generation: {
+    canGenerate: boolean;
+    state: 'ready' | 'login-needed' | 'credential-only' | 'backend-forced';
+    message: string;
+    action: string;
   };
 };
 
@@ -83,7 +93,7 @@ export async function handleCodexImageGenerationsRequest(
       throw new ImageProxyError(
         503,
         'codex_auth_missing',
-        'No Codex/OpenAI credential found. Run Codex login or configure OPENAI_API_KEY.',
+        'No Codex/OpenAI credential found. Run Codex login first; configure OPENAI_API_KEY only as the last fallback.',
       );
     }
 
@@ -120,6 +130,13 @@ export async function getCodexImageProxyStatus(baseUrl: string): Promise<CodexIm
   const credential = await resolveOpenAIOAuthCredential();
   const accountId =
     typeof credential?.accountId === 'string' ? credential.accountId.trim() : '';
+  const responsesModel = await resolveCodexResponsesModel();
+  const backend = {
+    forceCodexBackend: process.env.OD_CODEX_IMAGE_FORCE_BACKEND === '1',
+    useResponsesTool: process.env.OD_CODEX_IMAGE_USE_TOOL === '1',
+    responsesModel: responsesModel.model,
+    responsesModelSource: responsesModel.source,
+  };
   return {
     enabled: true,
     baseUrl: `${baseUrl.replace(/\/+$/, '')}/v1`,
@@ -135,11 +152,86 @@ export async function getCodexImageProxyStatus(baseUrl: string): Promise<CodexIm
       enabled: Boolean(process.env.OD_CODEX_IMAGE_PROXY_KEY?.trim()),
       env: 'OD_CODEX_IMAGE_PROXY_KEY',
     },
-    backend: {
-      forceCodexBackend: process.env.OD_CODEX_IMAGE_FORCE_BACKEND === '1',
-      useResponsesTool: process.env.OD_CODEX_IMAGE_USE_TOOL === '1',
-      responsesModel: process.env.OD_CODEX_IMAGE_RESPONSES_MODEL?.trim() || DEFAULT_CODEX_RESPONSES_MODEL,
-    },
+    backend,
+    generation: assessGenerationReadiness(credential, backend),
+  };
+}
+
+async function resolveCodexResponsesModel(): Promise<{
+  model: string;
+  source: CodexImageProxyStatus['backend']['responsesModelSource'];
+}> {
+  const envModel = process.env.OD_CODEX_IMAGE_RESPONSES_MODEL?.trim();
+  if (envModel) return { model: envModel, source: 'env' };
+
+  const configModel = await readCodexConfigModel();
+  if (configModel) return { model: configModel, source: 'codex-config' };
+
+  return { model: DEFAULT_CODEX_RESPONSES_MODEL, source: 'default' };
+}
+
+async function readCodexConfigModel(): Promise<string> {
+  try {
+    const raw = await readFile(path.join(homedir(), '.codex', 'config.toml'), 'utf8');
+    for (const line of raw.split(/\r?\n/)) {
+      const match = line.match(/^\s*model\s*=\s*["']([^"']+)["']/);
+      if (match?.[1]?.trim()) return match[1].trim();
+    }
+  } catch {
+    return '';
+  }
+  return '';
+}
+
+function assessGenerationReadiness(
+  credential: any,
+  backend: CodexImageProxyStatus['backend'],
+): CodexImageProxyStatus['generation'] {
+  const credentialSource = typeof credential?.source === 'string' ? credential.source : '';
+  const isOAuth = credentialSource === 'oauth-codex' || credentialSource === 'oauth-hermes';
+  const hasAccountId = typeof credential?.accountId === 'string' && credential.accountId.trim().length > 0;
+
+  if (!credential?.apiKey) {
+    return {
+      canGenerate: false,
+      state: 'login-needed',
+      message: 'No Codex or OpenAI credential is available for the local image proxy.',
+      action: 'Run Codex login first. Configure an image provider API key only as the last fallback.',
+    };
+  }
+
+  if (backend.forceCodexBackend && (!isOAuth || !hasAccountId)) {
+    return {
+      canGenerate: false,
+      state: 'backend-forced',
+      message: `The proxy is forced onto the Codex responses backend (${backend.responsesModel}), so image generation is not a verified direct Images API path.`,
+      action: 'Restart the app with normal proxy mode, or run Codex login again so the account id is available.',
+    };
+  }
+
+  if (isOAuth && !hasAccountId) {
+    return {
+      canGenerate: false,
+      state: 'credential-only',
+      message: 'Codex OAuth is present, but the account id needed by the Codex image backend is missing.',
+      action: 'Restart the app, refresh status, then run Codex login again if the account still does not appear.',
+    };
+  }
+
+  if (isOAuth) {
+    return {
+      canGenerate: true,
+      state: 'ready',
+      message: `Codex proxy image generation is configured with ${backend.responsesModel}.`,
+      action: 'If generation fails, restart the app, refresh status, then run Codex login again before falling back to API keys.',
+    };
+  }
+
+  return {
+    canGenerate: true,
+    state: 'ready',
+    message: 'A platform-style OpenAI credential is available for the direct Images API path.',
+    action: 'Use this Base URL with an OpenAI image model.',
   };
 }
 
@@ -166,7 +258,7 @@ export async function generateCodexImageWithOAuth({
     throw new ImageProxyError(
       503,
       'codex_auth_missing',
-      'No Codex/OpenAI credential found. Run Codex login or configure OPENAI_API_KEY.',
+      'No Codex/OpenAI credential found. Run Codex login first; configure OPENAI_API_KEY only as the last fallback.',
     );
   }
   if (!credential.accountId) {
@@ -340,6 +432,7 @@ async function callCodexResponsesBackend(
   const images: string[] = [];
   let created = Math.floor(Date.now() / 1000);
   let lastPayload: any = null;
+  const responsesModel = await resolveCodexResponsesModel();
 
   for (let i = 0; i < request.n; i += 1) {
     const resp = await fetchImpl(CODEX_RESPONSES_URL, {
@@ -352,7 +445,7 @@ async function callCodexResponsesBackend(
         'openai-beta': 'responses=experimental',
         originator: 'codex_cli_rs',
       },
-      body: JSON.stringify(buildCodexResponsesBody(request)),
+      body: JSON.stringify(buildCodexResponsesBody(request, responsesModel.model)),
     });
     if (!resp.ok) {
       const text = await resp.text();
@@ -384,8 +477,7 @@ async function callCodexResponsesBackend(
   };
 }
 
-function buildCodexResponsesBody(request: ImageGenerationRequest) {
-  const responsesModel = process.env.OD_CODEX_IMAGE_RESPONSES_MODEL?.trim() || DEFAULT_CODEX_RESPONSES_MODEL;
+function buildCodexResponsesBody(request: ImageGenerationRequest, responsesModel: string) {
   const body: Record<string, unknown> = {
     model: responsesModel,
     input: [

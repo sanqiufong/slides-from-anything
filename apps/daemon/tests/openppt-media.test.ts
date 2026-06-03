@@ -257,7 +257,7 @@ export default [PendingMedia];
           'chatgpt-account-id': 'acct_test',
         });
         expect(JSON.parse(String(init?.body))).toMatchObject({
-          model: 'gpt-5.2',
+          model: 'gpt-5.5',
           input: [
             {
               role: 'user',

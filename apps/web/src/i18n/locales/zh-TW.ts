@@ -112,7 +112,7 @@ export const zhTW: Dict = {
   'settings.modelCustomLabel': '自訂模型 id',
   'settings.modelCustomPlaceholder': '例如 anthropic/claude-sonnet-4-6',
   'settings.mediaProviders': '媒體生成提供商',
-  'settings.mediaProvidersHint': '圖片、影片、音訊生成的 API key。存於本機並同步到本地守護程序。',
+  'settings.mediaProvidersHint': '圖片生成優先使用 Codex 代理。只有需要外部圖片、影片或音訊服務時，才在這裡新增 API key。',
   'settings.mediaProviderApiKey': 'API key',
   'settings.mediaProviderBaseUrl': 'Base URL',
   'settings.mediaProviderConfigured': '已設定',

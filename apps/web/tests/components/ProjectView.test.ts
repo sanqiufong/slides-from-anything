@@ -83,7 +83,14 @@ describe('ProjectView deck media intent', () => {
         backend: {
           forceCodexBackend: false,
           useResponsesTool: false,
-          responsesModel: 'gpt-5.2',
+          responsesModel: 'gpt-5.5',
+          responsesModelSource: 'codex-config',
+        },
+        generation: {
+          canGenerate: true,
+          state: 'ready',
+          message: 'Codex proxy image generation is configured.',
+          action: 'Restart the app if generation fails.',
         },
       },
     });
@@ -103,6 +110,54 @@ describe('ProjectView deck media intent', () => {
     expect(deckMediaFromPrompt('关键页面生成图片辅助描述', undefined, 'gpt-image-2')?.imageModel).toBe(
       'gpt-image-2',
     );
+  });
+
+  it('does not treat incomplete Codex OAuth as an available image environment', () => {
+    const environments = deckMediaImageEnvironments({
+      daemonProviders: {
+        openai: {
+          configured: true,
+          source: 'oauth-codex',
+          baseUrl: '',
+        },
+      },
+      codexImageProxyStatus: {
+        enabled: true,
+        baseUrl: 'http://127.0.0.1:51235/v1',
+        endpoint: '/images/generations',
+        defaultModel: 'gpt-image-2',
+        auth: {
+          configured: true,
+          source: 'oauth-codex',
+          accountIdConfigured: false,
+          accountIdTail: '',
+        },
+        proxyKey: {
+          enabled: false,
+          env: 'OD_CODEX_IMAGE_PROXY_KEY',
+        },
+        backend: {
+          forceCodexBackend: false,
+          useResponsesTool: false,
+          responsesModel: 'gpt-5.5',
+          responsesModelSource: 'codex-config',
+        },
+        generation: {
+          canGenerate: false,
+          state: 'credential-only',
+          message: 'Codex OAuth is present, but the account id is missing.',
+          action: 'Restart the app, then run Codex login again.',
+        },
+      },
+    });
+
+    expect(environments).toEqual([]);
+    expect(
+      deckMediaImageModelChoice({
+        prompt: '关键页面生成图片辅助描述',
+        environments,
+      }),
+    ).toEqual({ notice: { kind: 'missing-provider' } });
   });
 
   it('continues with pending media slots when no image environment is available', () => {

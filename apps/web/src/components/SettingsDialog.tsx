@@ -65,7 +65,11 @@ interface Props {
 
 const SUGGESTED_MODELS_BY_PROTOCOL = {
   anthropic: [
+    'claude-opus-4-8',
+    'claude-opus-4-7',
+    'claude-opus-4-6',
     'claude-opus-4-5',
+    'claude-sonnet-4-6',
     'claude-sonnet-4-5',
     'claude-haiku-4-5',
     'deepseek-chat',
@@ -148,6 +152,49 @@ export function codexImageProxyAuthLabel(status: CodexImageProxyStatus | null): 
   if (status.auth.source === 'oauth-codex') return 'Codex OAuth';
   if (status.auth.source === 'codex-auth') return 'Codex API key';
   return status.auth.source;
+}
+
+export function codexImageProxyGenerationLabel(status: CodexImageProxyStatus | null): string {
+  if (!status) return 'Checking...';
+  const generation = status.generation;
+  if (!generation) return status.auth.configured ? 'Check proxy' : 'Needs login';
+  if (generation.canGenerate) return 'Ready';
+  if (generation.state === 'credential-only') return 'Repair needed';
+  if (generation.state === 'backend-forced') return 'Unavailable';
+  if (generation.state === 'login-needed') return 'Needs login';
+  return 'Needs image key';
+}
+
+function codexImageProxySetupNotice(status: CodexImageProxyStatus | null): { title: string; body: string } | null {
+  if (!status) {
+    return {
+      title: 'Checking image generation setup...',
+      body: 'This will show whether the app can create image bytes.',
+    };
+  }
+  if (status.generation?.canGenerate) return null;
+  if (status.generation?.state === 'login-needed' || !status.auth.configured) {
+    return {
+      title: 'Image generation is not set up.',
+      body: 'Connect Codex first. Provider API keys below are available as the last fallback.',
+    };
+  }
+  if (status.generation?.state === 'backend-forced') {
+    return {
+      title: 'Image generation is unavailable in the current proxy mode.',
+      body: 'Restart the app in normal proxy mode, then try image generation again.',
+    };
+  }
+  if (status.generation?.state === 'credential-only') {
+    return {
+      title: 'Codex proxy needs repair.',
+      body: 'Restart the app first, then refresh this status. If this still appears, run Codex login again.',
+    };
+  }
+  return {
+    title: 'Codex proxy could not create images.',
+    body: 'Repair the proxy first: restart the app, refresh this status, then run Codex login again. Use a provider API key only as the last fallback.',
+  };
 }
 
 function appUpdateStatusText(
@@ -1400,10 +1447,27 @@ function CodexImageProxyCard() {
   const proxyKeyLabel = status?.proxyKey.enabled
     ? 'Required'
     : 'Off';
+  const generationLabel = codexImageProxyGenerationLabel(status);
+  const generationNotice = codexImageProxySetupNotice(status);
+  const primaryBadgeClass = status?.generation?.canGenerate
+    ? 'on'
+    : status?.auth.configured
+      ? 'warn'
+      : 'unsupported';
   const backendLabel = status
     ? [
         status.backend.forceCodexBackend ? 'Codex only' : 'Images + fallback',
         status.backend.useResponsesTool ? 'Tool mode' : '',
+      ].filter(Boolean).join(' · ')
+    : 'Checking...';
+  const responsesModelLabel = status
+    ? [
+        status.backend.responsesModel,
+        status.backend.responsesModelSource === 'codex-config'
+          ? 'Codex config'
+          : status.backend.responsesModelSource === 'env'
+            ? 'env'
+            : 'default',
       ].filter(Boolean).join(' · ')
     : 'Checking...';
 
@@ -1421,67 +1485,94 @@ function CodexImageProxyCard() {
   };
 
   return (
-    <div className={`media-provider-row codex-image-proxy-row${status?.auth.configured ? '' : ' pending'}`}>
+    <div className={`media-provider-row codex-image-proxy-row${status?.generation?.canGenerate ? '' : ' pending'}`}>
       <div className="media-provider-head">
         <div className="media-provider-meta">
           <span className="media-provider-name">Codex Image Proxy</span>
-          <span className="media-provider-hint">OpenAI-compatible local image endpoint</span>
+          <span className="media-provider-hint">Uses your Codex login for local image generation</span>
         </div>
         <div className="media-provider-badges">
-          <span className="media-provider-badge integrated">/v1</span>
-          <span className={`media-provider-badge ${status?.auth.configured ? 'on' : 'unsupported'}`}>
-            {loading ? 'Checking' : status?.auth.configured ? 'Ready' : 'Login needed'}
+          <span className={`media-provider-badge ${primaryBadgeClass}`}>
+            {loading ? 'Checking' : generationLabel}
           </span>
-          {status?.proxyKey.enabled ? (
-            <span className="media-provider-badge on">Key required</span>
-          ) : null}
         </div>
       </div>
 
-      <div className="codex-proxy-control-row">
-        <label className="field codex-proxy-base">
-          <span className="field-label">Base URL</span>
-          <span className="codex-proxy-copy-row">
-            <input readOnly value={baseUrl} aria-label="Codex Image Proxy Base URL" />
-            <button type="button" className="ghost" onClick={() => void copyBaseUrl()}>
-              <Icon name={copied === 'baseUrl' ? 'check' : 'copy'} size={13} />
-              <span>{copied === 'baseUrl' ? 'Copied' : 'Copy'}</span>
-            </button>
-          </span>
-        </label>
+      <div className="codex-proxy-summary" aria-label="Codex Image Proxy status">
+        <span>
+          <strong>Codex login</strong>
+          <em>{status?.auth.configured ? 'Connected' : 'Not connected'}</em>
+        </span>
+        <span>
+          <strong>Image generation</strong>
+          <em>{generationLabel}</em>
+        </span>
+      </div>
 
-        <div className="codex-proxy-actions">
+      {generationNotice ? (
+        <div className="codex-proxy-notice" role="status">
+          <div>
+            <strong>{generationNotice.title}</strong>
+            <span>{generationNotice.body}</span>
+          </div>
           <button type="button" className="ghost" onClick={() => void refresh()} disabled={loading}>
             <Icon name={loading ? 'spinner' : 'refresh'} size={13} />
-            <span>{loading ? 'Checking' : 'Refresh'}</span>
-          </button>
-          <button type="button" className="ghost" onClick={() => void copyCurl()}>
-            <Icon name={copied === 'curl' ? 'check' : 'copy'} size={13} />
-            <span>{copied === 'curl' ? 'Copied' : 'Copy curl'}</span>
+            <span>{loading ? 'Checking' : 'Refresh status'}</span>
           </button>
         </div>
-      </div>
+      ) : null}
 
-      <div className="codex-proxy-facts" aria-label="Codex Image Proxy status">
-        <span>
-          <strong>Auth</strong>
-          <em>{authLabel}</em>
-        </span>
-        <span>
-          <strong>Account</strong>
-          <em>{accountLabel}</em>
-        </span>
-        <span>
-          <strong>Proxy key</strong>
-          <em>{proxyKeyLabel}</em>
-        </span>
-        <span>
-          <strong>Backend</strong>
-          <em>{backendLabel}</em>
-        </span>
-      </div>
+      <details className="codex-proxy-advanced">
+        <summary>Advanced proxy details</summary>
+        <div className="codex-proxy-control-row">
+          <label className="field codex-proxy-base">
+            <span className="field-label">Base URL</span>
+            <span className="codex-proxy-copy-row">
+              <input readOnly value={baseUrl} aria-label="Codex Image Proxy Base URL" />
+              <button type="button" className="ghost" onClick={() => void copyBaseUrl()}>
+                <Icon name={copied === 'baseUrl' ? 'check' : 'copy'} size={13} />
+                <span>{copied === 'baseUrl' ? 'Copied' : 'Copy'}</span>
+              </button>
+            </span>
+          </label>
 
-      <pre className="codex-proxy-snippet">{curl}</pre>
+          <div className="codex-proxy-actions">
+            <button type="button" className="ghost" onClick={() => void refresh()} disabled={loading}>
+              <Icon name={loading ? 'spinner' : 'refresh'} size={13} />
+              <span>{loading ? 'Checking' : 'Refresh'}</span>
+            </button>
+            <button type="button" className="ghost" onClick={() => void copyCurl()}>
+              <Icon name={copied === 'curl' ? 'check' : 'copy'} size={13} />
+              <span>{copied === 'curl' ? 'Copied' : 'Copy curl'}</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="codex-proxy-facts" aria-label="Codex Image Proxy technical status">
+          <span>
+            <strong>Auth</strong>
+            <em>{authLabel}</em>
+          </span>
+          <span>
+            <strong>Account</strong>
+            <em>{accountLabel}</em>
+          </span>
+          <span>
+            <strong>Proxy key</strong>
+            <em>{proxyKeyLabel}</em>
+          </span>
+          <span>
+            <strong>Codex model</strong>
+            <em>{responsesModelLabel}</em>
+          </span>
+          <span>
+            <strong>Backend</strong>
+            <em>{backendLabel}</em>
+          </span>
+        </div>
+
+        <pre className="codex-proxy-snippet">{curl}</pre>
+      </details>
       {error ? <p className="settings-field-error">{error}</p> : null}
     </div>
   );

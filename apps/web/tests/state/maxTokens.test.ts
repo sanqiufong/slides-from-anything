@@ -25,6 +25,11 @@ describe('modelMaxTokensDefault', () => {
     expect(modelMaxTokensDefault('mimo-v2.5-pro')).toBe(32768);
   });
 
+  it('covers the explicit Claude Opus 4.8 pin before LiteLLM carries it', () => {
+    expect((litellmData.models as Record<string, number>)['claude-opus-4-8']).toBeUndefined();
+    expect(modelMaxTokensDefault('claude-opus-4-8')).toBe(128000);
+  });
+
   it('returns FALLBACK_MAX_TOKENS for unknown ids', () => {
     expect(modelMaxTokensDefault('definitely-not-a-real-model-x9z')).toBe(FALLBACK_MAX_TOKENS);
     expect(FALLBACK_MAX_TOKENS).toBe(8192);

@@ -75,7 +75,15 @@ export const KNOWN_PROVIDERS: KnownProvider[] = [
     protocol: 'anthropic',
     baseUrl: 'https://api.anthropic.com',
     model: 'claude-sonnet-4-5',
-    models: ['claude-sonnet-4-5', 'claude-opus-4-5', 'claude-haiku-4-5'],
+    models: [
+      'claude-sonnet-4-6',
+      'claude-sonnet-4-5',
+      'claude-opus-4-8',
+      'claude-opus-4-7',
+      'claude-opus-4-6',
+      'claude-opus-4-5',
+      'claude-haiku-4-5',
+    ],
   },
   {
     label: 'DeepSeek — Anthropic',

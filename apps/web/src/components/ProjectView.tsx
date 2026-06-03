@@ -224,6 +224,19 @@ function isCodexOpenAIOAuth(entry: MediaProviderConfigStatus | undefined): boole
   return entry?.source === 'oauth-codex' || entry?.source === 'oauth-hermes';
 }
 
+function isCodexManagedOpenAI(entry: MediaProviderConfigStatus | undefined): boolean {
+  return isCodexOpenAIOAuth(entry) || entry?.source === 'codex-auth';
+}
+
+function codexImageProxyCanGenerate(status: CodexImageProxyStatus | null | undefined): boolean {
+  return Boolean(
+    status?.enabled !== false &&
+      status?.auth.configured === true &&
+      status.generation?.canGenerate === true &&
+      status.defaultModel,
+  );
+}
+
 function defaultImageModelForProvider(providerId: MediaProviderId): string | null {
   return (
     IMAGE_MODELS.find((model) => model.provider === providerId && model.default)?.id ??
@@ -242,16 +255,16 @@ export function deckMediaImageEnvironments({
   codexImageProxyStatus?: CodexImageProxyStatus | null;
 }): DeckMediaImageEnvironment[] {
   const environments: DeckMediaImageEnvironment[] = [];
-  const codexReady =
-    codexImageProxyStatus?.enabled !== false &&
-    codexImageProxyStatus?.auth.configured === true &&
-    Boolean(codexImageProxyStatus.defaultModel);
+  const codexProxyModel = codexImageProxyCanGenerate(codexImageProxyStatus)
+    ? codexImageProxyStatus?.defaultModel
+    : null;
+  const codexReady = Boolean(codexProxyModel);
 
-  if (codexReady) {
+  if (codexProxyModel) {
     environments.push({
       id: 'codex-image-proxy',
       label: 'Codex Image Proxy',
-      model: codexImageProxyStatus.defaultModel,
+      model: codexProxyModel,
       providerId: 'openai',
     });
   }
@@ -260,18 +273,20 @@ export function deckMediaImageEnvironments({
     const provider = findProvider(providerId);
     const model = defaultImageModelForProvider(providerId);
     if (!provider || !model) continue;
+    const localActive = mediaProviderConfigIsActive(localProviders?.[providerId]);
+    const daemonProvider = daemonProviders?.[providerId];
+    const daemonActive = providerId === 'openai' && isCodexOpenAIOAuth(daemonProvider)
+      ? false
+      : mediaProviderConfigIsActive(daemonProvider);
     if (
       providerId === 'openai' &&
       codexReady &&
-      !mediaProviderConfigIsActive(localProviders?.openai) &&
-      isCodexOpenAIOAuth(daemonProviders?.openai)
+      !localActive &&
+      isCodexManagedOpenAI(daemonProvider)
     ) {
       continue;
     }
-    if (
-      !mediaProviderConfigIsActive(localProviders?.[providerId]) &&
-      !mediaProviderConfigIsActive(daemonProviders?.[providerId])
-    ) {
+    if (!localActive && !daemonActive) {
       continue;
     }
     environments.push({

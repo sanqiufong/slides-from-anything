@@ -22,6 +22,9 @@ export const MAX_MAX_TOKENS = 200000;
 const LITELLM_MODELS = litellmData.models as Record<string, number>;
 
 const OVERRIDES: Record<string, number> = {
+  // Claude Opus 4.8 launched after the vendored LiteLLM snapshot in this repo.
+  // Anthropic documents a 128k max output token limit for the canonical API id.
+  'claude-opus-4-8': 128000,
   // LiteLLM lists MiMo via OpenRouter and Novita aliases (16k / 32k) but
   // not the canonical `mimo-v2.5-pro` id we hand to Xiaomi's direct API.
   // 32k matches what issue #29 reports as the working ceiling.

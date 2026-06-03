@@ -125,7 +125,7 @@ function CliCard({
   const Icon = visual.icon;
   const installed = agent.available;
   // Always expose the agent's full model list (including "default") as chips
-  // so users can swap between Sonnet / Opus / Haiku without leaving the card.
+  // so users can swap between explicit pins and aliases without leaving the card.
   const modelChips = agent.models;
   return (
     <div

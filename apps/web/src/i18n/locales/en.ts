@@ -112,7 +112,7 @@ export const en: Dict = {
   'settings.modelCustomPlaceholder': 'e.g. anthropic/claude-sonnet-4-6',
   'settings.mediaProviders': 'Media providers',
   'settings.mediaProvidersHint':
-    'API keys for image, video and audio generation. Stored locally and synced to the local daemon.',
+    'Codex proxy is preferred for image generation. Add provider API keys only when you need external image, video, or audio providers.',
   'settings.mediaProviderApiKey': 'API key',
   'settings.mediaProviderBaseUrl': 'Base URL',
   'settings.mediaProviderConfigured': 'Configured',

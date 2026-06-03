@@ -13,6 +13,7 @@ describe('Codex image proxy', () => {
   const originalHome = process.env.HOME;
   const originalForceBackend = process.env.OD_CODEX_IMAGE_FORCE_BACKEND;
   const originalProxyKey = process.env.OD_CODEX_IMAGE_PROXY_KEY;
+  const originalResponsesModel = process.env.OD_CODEX_IMAGE_RESPONSES_MODEL;
   let homeDir: string;
   let server: http.Server;
   let baseUrl: string;
@@ -22,6 +23,7 @@ describe('Codex image proxy', () => {
     process.env.HOME = homeDir;
     delete process.env.OD_CODEX_IMAGE_FORCE_BACKEND;
     delete process.env.OD_CODEX_IMAGE_PROXY_KEY;
+    delete process.env.OD_CODEX_IMAGE_RESPONSES_MODEL;
     const started = await startServer({ port: 0, returnServer: true }) as {
       url: string;
       server: http.Server;
@@ -49,6 +51,11 @@ describe('Codex image proxy', () => {
     } else {
       process.env.OD_CODEX_IMAGE_PROXY_KEY = originalProxyKey;
     }
+    if (originalResponsesModel == null) {
+      delete process.env.OD_CODEX_IMAGE_RESPONSES_MODEL;
+    } else {
+      process.env.OD_CODEX_IMAGE_RESPONSES_MODEL = originalResponsesModel;
+    }
   });
 
   async function writeCodexAuth() {
@@ -65,6 +72,12 @@ describe('Codex image proxy', () => {
       }),
       'utf8',
     );
+  }
+
+  async function writeCodexConfig(model: string) {
+    const file = path.join(homeDir, '.codex', 'config.toml');
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, `model = "${model}"\nmodel_reasoning_effort = "high"\n`, 'utf8');
   }
 
   it('exposes an OpenAI-compatible /v1/images/generations route using Codex auth', async () => {
@@ -127,13 +140,38 @@ describe('Codex image proxy', () => {
         enabled: true,
         env: 'OD_CODEX_IMAGE_PROXY_KEY',
       },
+      backend: {
+        responsesModel: 'gpt-5.5',
+        responsesModelSource: 'default',
+      },
+      generation: {
+        canGenerate: true,
+        state: 'ready',
+        message: expect.stringContaining('Codex proxy image generation is configured'),
+        action: expect.stringContaining('restart the app'),
+      },
     });
     expect(JSON.stringify(body)).not.toContain('codex-access-token');
     expect(JSON.stringify(body)).not.toContain('acct_test');
   });
 
+  it('uses the user Codex config model for the responses backend status', async () => {
+    await writeCodexAuth();
+    await writeCodexConfig('gpt-5.1');
+
+    const res = await realFetch(`${baseUrl}/api/codex-image-proxy/status`);
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      backend: {
+        responsesModel: 'gpt-5.1',
+        responsesModelSource: 'codex-config',
+      },
+    });
+  });
+
   it('falls back to the Codex responses backend when the direct image API fails', async () => {
     await writeCodexAuth();
+    await writeCodexConfig('gpt-5.5');
     const imageBase64 = Buffer.from('fake-image-bytes'.repeat(8)).toString('base64');
     const fetchMock = vi.fn((input: FetchInput, init?: FetchInit) => {
       const url = String(input);
@@ -147,7 +185,7 @@ describe('Codex image proxy', () => {
         'chatgpt-account-id': 'acct_test',
       });
       expect(JSON.parse(String(init?.body))).toMatchObject({
-        model: 'gpt-5.2',
+        model: 'gpt-5.5',
         input: [
           {
             role: 'user',

@@ -627,6 +627,8 @@ async function renderCodexImageFallback(ctx, credentials, { azure, directError, 
       [
         `Codex image backend failed for ${ctx.model}: ${errorWithCause(err)}`,
         'The local Codex Image Proxy credential is present, but the upstream image request did not complete.',
+        'Repair the Codex proxy first: restart the app, refresh Settings -> Media Providers, then run Codex login again if the account is still missing.',
+        'Use a provider API key only as the last fallback.',
         directError ? `Direct OpenAI Images API also failed: ${directError.message || directError}` : '',
       ]
         .filter(Boolean)

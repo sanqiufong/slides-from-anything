@@ -70,6 +70,85 @@ const agentCapabilities = new Map();
 
 const DEFAULT_MODEL_OPTION = { id: 'default', label: 'Default (CLI config)' };
 
+const CLAUDE_CODE_MODEL_OPTIONS = [
+  DEFAULT_MODEL_OPTION,
+  { id: 'best', label: 'Best (alias)' },
+  { id: 'claude-opus-4-8', label: 'Claude Opus 4.8' },
+  { id: 'claude-opus-4-8[1m]', label: 'Claude Opus 4.8 1M' },
+  { id: 'claude-opus-4-7', label: 'Claude Opus 4.7' },
+  { id: 'claude-opus-4-7[1m]', label: 'Claude Opus 4.7 1M' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+  { id: 'claude-opus-4-6[1m]', label: 'Claude Opus 4.6 1M' },
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { id: 'claude-sonnet-4-6[1m]', label: 'Claude Sonnet 4.6 1M' },
+  { id: 'claude-sonnet-4-5', label: 'Claude Sonnet 4.5' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+  { id: 'sonnet', label: 'Sonnet (alias)' },
+  { id: 'opus', label: 'Opus (alias)' },
+  { id: 'haiku', label: 'Haiku (alias)' },
+  { id: 'sonnet[1m]', label: 'Sonnet 1M (alias)' },
+  { id: 'opus[1m]', label: 'Opus 1M (alias)' },
+  { id: 'opusplan', label: 'Opus Plan (alias)' },
+];
+
+function labelClaudeCodeModel(id) {
+  if (
+    id === process.env.ANTHROPIC_CUSTOM_MODEL_OPTION &&
+    process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME
+  ) {
+    return process.env.ANTHROPIC_CUSTOM_MODEL_OPTION_NAME;
+  }
+  return String(id)
+    .replace(/^claude-/, 'Claude ')
+    .replace(/\[1m\]$/i, ' 1M')
+    .split('-')
+    .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+    .join(' ');
+}
+
+function dedupeModelOptions(models) {
+  const seen = new Set();
+  const out = [];
+  for (const model of models) {
+    if (!model?.id || seen.has(model.id)) continue;
+    seen.add(model.id);
+    out.push(model);
+  }
+  return out;
+}
+
+function claudeCodeEnvModels() {
+  return [
+    process.env.ANTHROPIC_MODEL,
+    process.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
+    process.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
+    process.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,
+    process.env.CLAUDE_CODE_SUBAGENT_MODEL,
+    process.env.ANTHROPIC_CUSTOM_MODEL_OPTION,
+  ]
+    .map((value) => value?.trim())
+    .filter((value) => value && value !== 'inherit')
+    .map((id) => ({ id, label: labelClaudeCodeModel(id) }));
+}
+
+function claudeCodeModelOptions(extraIds = []) {
+  return dedupeModelOptions([
+    ...CLAUDE_CODE_MODEL_OPTIONS,
+    ...extraIds.map((id) => ({ id, label: labelClaudeCodeModel(id) })),
+    ...claudeCodeEnvModels(),
+  ]);
+}
+
+function parseClaudeCodeHelpModels(stdout) {
+  const ids = new Set();
+  for (const match of String(stdout || '').matchAll(
+    /\bclaude-(?:opus|sonnet|haiku)-[A-Za-z0-9-]+(?:\[1m\])?\b/g,
+  )) {
+    ids.add(match[0]);
+  }
+  return claudeCodeModelOptions(Array.from(ids));
+}
+
 function shouldDisableCodexPlugins() {
   return process.env.OD_CODEX_DISABLE_PLUGINS === '1' || process.env.OD_CODEX_ENABLE_PLUGINS !== '1';
 }
@@ -148,19 +227,15 @@ export const AGENT_DEFS = [
       '--include-partial-messages': 'partialMessages',
       '--add-dir': 'addDir',
     },
-    // `claude` has no list-models subcommand; the CLI accepts both short
-    // aliases (sonnet/opus/haiku) and the full ids, so we ship both as
-    // hints. Users who want a non-shipped model can paste it via the
-    // Settings dialog's custom-model input.
-    fallbackModels: [
-      DEFAULT_MODEL_OPTION,
-      { id: 'sonnet', label: 'Sonnet (alias)' },
-      { id: 'opus', label: 'Opus (alias)' },
-      { id: 'haiku', label: 'Haiku (alias)' },
-      { id: 'claude-opus-4-5', label: 'claude-opus-4-5' },
-      { id: 'claude-sonnet-4-5', label: 'claude-sonnet-4-5' },
-      { id: 'claude-haiku-4-5', label: 'claude-haiku-4-5' },
-    ],
+    // Claude Code exposes its full picker only interactively via `/model`.
+    // For the web picker, merge documented aliases, known full ids, model ids
+    // seen in `claude --help`, and ANTHROPIC_* env pins/custom options.
+    listModels: {
+      args: ['--help'],
+      timeoutMs: 5000,
+      parse: parseClaudeCodeHelpModels,
+    },
+    fallbackModels: claudeCodeModelOptions(),
     // Prompt delivered via stdin to avoid both Linux `spawn E2BIG`
     // (MAX_ARG_STRLEN caps a single argv entry at ~128 KB) and Windows
     // `spawn ENAMETOOLONG` (CreateProcess caps the full command line at
@@ -572,6 +647,10 @@ export const AGENT_DEFS = [
     // `pi --list-models` fails or times out.
     fallbackModels: [
       DEFAULT_MODEL_OPTION,
+      {
+        id: 'anthropic/claude-opus-4-8',
+        label: 'Claude Opus 4.8 (anthropic)',
+      },
       {
         id: 'anthropic/claude-sonnet-4-5',
         label: 'Claude Sonnet 4.5 (anthropic)',

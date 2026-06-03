@@ -148,6 +148,13 @@ export interface CodexImageProxyStatus {
     forceCodexBackend: boolean;
     useResponsesTool: boolean;
     responsesModel: string;
+    responsesModelSource?: 'env' | 'codex-config' | 'default';
+  };
+  generation?: {
+    canGenerate: boolean;
+    state: 'ready' | 'login-needed' | 'credential-only' | 'backend-forced';
+    message: string;
+    action: string;
   };
 }
 
