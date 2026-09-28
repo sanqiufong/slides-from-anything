@@ -41,6 +41,7 @@ const ALLOWED_SECRET_ENV_NAMES = new Set([
   "ANTHROPIC_API_KEY",
   "GEMINI_API_KEY",
   "DEEPSEEK_API_KEY",
+  "EVOLINK_API_KEY",
 ]);
 
 type ModelEnvKey = (typeof MODEL_ENV_KEYS)[number];
@@ -655,6 +656,14 @@ function buildEndpointCandidates(config: ModelRuntimeConfig, agents: DetectedAge
       model: process.env.OPENROUTER_MODEL || "anthropic/claude-sonnet-4.5",
       keyEnvName: "OPENROUTER_API_KEY",
       description: "检测到 OpenRouter key 时可一键转为 Design Vault 模型后端。",
+    },
+    {
+      id: "evolink-env",
+      label: "EvoLink env",
+      baseUrl: "https://api.evolink.ai/v1",
+      model: process.env.EVOLINK_MODEL || "gpt-5.2",
+      keyEnvName: "EVOLINK_API_KEY",
+      description: "检测到 EvoLink key 时可一键转为 Design Vault 的 OpenAI-compatible 模型后端。",
     },
     {
       id: "moonshot-env",

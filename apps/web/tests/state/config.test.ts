@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_CONFIG,
+  KNOWN_PROVIDERS,
   loadConfig,
   syncComposioConfigToDaemon,
 } from '../../src/state/config';
@@ -165,5 +166,15 @@ describe('loadConfig', () => {
   it('sets an explicit apiProtocol for new default configs', () => {
     expect(DEFAULT_CONFIG.apiProtocol).toBe('anthropic');
     expect(DEFAULT_CONFIG.configMigrationVersion).toBe(1);
+  });
+
+  it('exposes EvoLink as an OpenAI-compatible provider preset', () => {
+    expect(KNOWN_PROVIDERS).toContainEqual({
+      label: 'EvoLink',
+      protocol: 'openai',
+      baseUrl: 'https://api.evolink.ai/v1',
+      model: 'gpt-5.2',
+      models: ['gpt-5.2', 'gpt-5.4', 'gpt-5.5', 'gpt-5.1'],
+    });
   });
 });
