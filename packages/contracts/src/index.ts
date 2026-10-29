@@ -8,6 +8,7 @@ export * from './api/connectors';
 export * from './api/comments';
 export * from './api/files';
 export * from './api/live-artifacts';
+export * from './api/openppt';
 export * from './api/projects';
 export * from './api/proxy';
 export * from './api/registry';

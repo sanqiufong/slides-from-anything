@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { ToolCard } from './ToolCard';
+import { DeckDeliveryReport } from './DeckDeliveryReport';
 import { renderMarkdown } from '../runtime/markdown';
 import { projectFileUrl } from '../providers/registry';
 import { splitOnQuestionForms, type QuestionForm } from '../artifacts/question-form';
@@ -135,6 +136,10 @@ export function AssistantMessage({
             onContinue={() => onContinueRemainingTasks?.(unfinishedTodos)}
           />
         ) : null}
+        {message.delivery ? <DeckDeliveryReport report={message.delivery} /> : null}
+        {message.runError ? <p className="deck-history-error" role="alert">{
+          message.runError.code === 'DAEMON_RESTARTED' ? t('delivery.interrupted') : message.runError.message
+        }</p> : null}
         <AssistantFooter
           streaming={streaming}
           startedAt={message.startedAt}

@@ -20,6 +20,7 @@ import type {
   ChatSseStartPayload,
   DaemonAgentPayload,
   SseErrorPayload,
+  DeckDeliveryReport,
 } from '@open-design/contracts';
 import type { StreamHandlers } from './anthropic';
 import { parseSseFrame } from './sse';
@@ -63,6 +64,8 @@ export interface DaemonStreamOptions {
   onRunCreated?: (runId: string) => void;
   onRunStatus?: (status: ChatRunStatus) => void;
   onRunEventId?: (eventId: string) => void;
+  onDelivery?: (report: DeckDeliveryReport) => void;
+  onRunError?: (error: { code: string; message: string }) => void;
 }
 
 export interface DaemonReattachOptions {
@@ -73,6 +76,8 @@ export interface DaemonReattachOptions {
   initialLastEventId?: string | null;
   onRunStatus?: (status: ChatRunStatus) => void;
   onRunEventId?: (eventId: string) => void;
+  onDelivery?: (report: DeckDeliveryReport) => void;
+  onRunError?: (error: { code: string; message: string }) => void;
 }
 
 export async function streamViaDaemon({
@@ -97,6 +102,8 @@ export async function streamViaDaemon({
   onRunCreated,
   onRunStatus,
   onRunEventId,
+  onDelivery,
+  onRunError,
 }: DaemonStreamOptions): Promise<void> {
   // Local CLIs are single-turn print-mode programs, so we collapse the whole
   // chat into one string. If this becomes too noisy for long histories, the
@@ -148,6 +155,8 @@ export async function streamViaDaemon({
       initialLastEventId,
       onRunStatus,
       onRunEventId,
+      onDelivery,
+      onRunError,
     });
   } catch (err) {
     if ((err as Error).name === 'AbortError') return;
@@ -193,6 +202,8 @@ async function consumeDaemonRun({
   initialLastEventId,
   onRunStatus,
   onRunEventId,
+  onDelivery,
+  onRunError,
 }: DaemonReattachOptions): Promise<void> {
   let acc = '';
   let stderrBuf = '';
@@ -202,6 +213,7 @@ async function consumeDaemonRun({
   let endStatus: ChatRunStatus | null = null;
   let lastEventId: string | null = initialLastEventId ?? null;
   let canceled = false;
+  let daemonError: string | null = null;
   const cancelRun = () => {
     if (canceled) return;
     canceled = true;
@@ -239,10 +251,11 @@ async function consumeDaemonRun({
       const decoder = new TextDecoder();
       let buf = '';
       let sawStreamProgress = false;
+      let endedNormally = false;
 
-      while (true) {
+      try { while (true) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) { endedNormally = true; break; }
         buf += decoder.decode(value, { stream: true });
         let idx: number;
         while ((idx = buf.indexOf('\n\n')) !== -1) {
@@ -257,6 +270,7 @@ async function consumeDaemonRun({
           if (parsed.kind !== 'event') continue;
           sawStreamProgress = true;
           if (parsed.id) {
+            if (lastEventId && (parsed.id === lastEventId || Number(parsed.id) <= Number(lastEventId))) continue;
             lastEventId = parsed.id;
             onRunEventId?.(parsed.id);
           }
@@ -305,19 +319,33 @@ async function consumeDaemonRun({
           }
 
           if (event.event === 'error') {
-            onRunStatus?.('failed');
             const data = event.data as SseErrorPayload;
-            handlers.onError(new Error(String(data.error?.message ?? data.message ?? 'daemon error')));
-            return;
+            daemonError = String(data.error?.message ?? data.message ?? 'daemon error');
+            onRunError?.({ code: data.error?.code ?? 'AGENT_EXECUTION_FAILED', message: daemonError });
+            continue;
+          }
+
+          if (event.event === 'delivery') {
+            onDelivery?.(event.data);
+            continue;
           }
 
           if (event.event === 'end') {
             exitCode = typeof event.data.code === 'number' ? event.data.code : null;
             exitSignal = typeof event.data.signal === 'string' ? event.data.signal : null;
             endStatus = isChatRunStatus(event.data.status) ? event.data.status : 'succeeded';
+            if (event.data.delivery) onDelivery?.(event.data.delivery);
             onRunStatus?.(endStatus);
           }
         }
+      } } catch (error) {
+        if ((error as Error).name === 'AbortError' || signal.aborted) throw error;
+        // Reconnect from the last accepted event; server replay is authoritative.
+      } finally { reader.releaseLock(); }
+      // Older daemons can close immediately after a fatal error without an end frame.
+      if (endedNormally && daemonError && endStatus === null) {
+        endStatus = 'failed';
+        onRunStatus?.('failed');
       }
       reconnects = sawStreamProgress ? 0 : reconnects + 1;
     }
@@ -329,6 +357,11 @@ async function consumeDaemonRun({
         exitCode = status.exitCode ?? null;
         exitSignal = status.signal ?? null;
         onRunStatus?.(endStatus);
+        if (status.delivery) onDelivery?.(status.delivery);
+        if (status.errorCode) {
+          daemonError = status.errorMessage ?? status.errorCode;
+          onRunError?.({ code: status.errorCode, message: daemonError });
+        }
       } else {
         handlers.onError(new Error('daemon stream disconnected before run completed'));
         return;
@@ -344,7 +377,7 @@ async function consumeDaemonRun({
         ? `${structuredTail}${stderrTail ? `\n\nstderr:\n${stderrTail}` : ''}`
         : stderrTail;
       handlers.onError(
-        new Error(`agent exited with ${exitSignal ? `signal ${exitSignal}` : `code ${exitCode}`}${detail ? `\n${detail}` : ''}`),
+        new Error(daemonError ?? `agent exited with ${exitSignal ? `signal ${exitSignal}` : `code ${exitCode}`}${detail ? `\n${detail}` : ''}`),
       );
       return;
     }

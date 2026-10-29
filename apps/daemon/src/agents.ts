@@ -217,7 +217,7 @@ export const AGENT_DEFS = [
     // Keep the CLI-config default and let users enter custom model IDs.
     fallbackModels: [DEFAULT_MODEL_OPTION],
     buildArgs: (_prompt, imagePaths = [], extraAllowedDirs = [], options = {}, runtimeContext = {}) => {
-      const args = ['--print', '--input-format', 'text', '--output-format', 'text',
+      const args = ['--print', '--input-format', 'text', '--output-format', 'stream-json',
         '--permission-mode', 'bypass_permissions'];
       if (runtimeContext.cwd) args.push('--cwd', runtimeContext.cwd);
       if (options.model && options.model !== 'default') args.push('--model', options.model);
@@ -228,7 +228,7 @@ export const AGENT_DEFS = [
       return args;
     },
     promptViaStdin: true,
-    streamFormat: 'plain',
+    streamFormat: 'qoder-stream-json',
   },
   {
     id: 'claude',

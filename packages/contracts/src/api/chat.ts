@@ -1,5 +1,6 @@
-import type { ProjectFile } from './files';
-import type { PreviewCommentPosition } from './comments';
+import type { ProjectFile } from './files.js';
+import type { PreviewCommentPosition } from './comments.js';
+import type { DeckDeliveryReport } from './openppt.js';
 
 export type ChatRole = 'user' | 'assistant';
 
@@ -45,6 +46,9 @@ export interface ChatRunStatusResponse {
   updatedAt: number;
   exitCode?: number | null;
   signal?: string | null;
+  errorCode?: string | null;
+  errorMessage?: string | null;
+  delivery?: DeckDeliveryReport;
 }
 
 export interface ChatRunListResponse {
@@ -155,4 +159,6 @@ export interface ChatMessage {
   slideFeedbackAttachments?: ChatSlideFeedbackAttachment[];
   vaultContextAttachments?: ChatVaultContextAttachment[];
   producedFiles?: ProjectFile[];
+  delivery?: DeckDeliveryReport;
+  runError?: { code: string; message: string };
 }

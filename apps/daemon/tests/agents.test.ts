@@ -91,9 +91,9 @@ test('qodercli supports discovery and keeps long prompts off argv', () => {
   assert.deepEqual(qoder.fallbackBins, ['qoder']);
   assert.deepEqual(qoder.versionArgs, ['--version']);
   assert.equal(qoder.promptViaStdin, true);
-  assert.equal(qoder.streamFormat, 'plain');
+  assert.equal(qoder.streamFormat, 'qoder-stream-json');
   const args = qoder.buildArgs('x'.repeat(200_000), [], [], { model: 'default' });
-  assert.deepEqual(args, ['--print', '--input-format', 'text', '--output-format', 'text',
+  assert.deepEqual(args, ['--print', '--input-format', 'text', '--output-format', 'stream-json',
     '--permission-mode', 'bypass_permissions']);
 });
 

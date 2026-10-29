@@ -1,6 +1,8 @@
+import { adaptationCopy } from '../adaptation-copy';
 import type { Dict } from '../types';
 
 export const zhCN: Dict = {
+  ...adaptationCopy['zh-CN'],
   'common.cancel': '取消',
   'common.save': '保存',
   'common.close': '关闭',

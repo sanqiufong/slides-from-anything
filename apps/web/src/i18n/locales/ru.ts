@@ -1,7 +1,9 @@
+import { adaptationCopy } from '../adaptation-copy';
 import type { Dict } from '../types';
 import { en } from './en';
 
 export const ru: Dict = {
+  ...adaptationCopy['ru'],
   ...en,
   'common.cancel': 'Отмена',
   'common.save': 'Сохранить',

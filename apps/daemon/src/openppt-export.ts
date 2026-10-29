@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import path from 'node:path';
 import fs from 'node:fs';
+import { runInNewContext } from 'node:vm';
 import os from 'node:os';
 import JSZip from 'jszip';
 
@@ -114,7 +115,7 @@ async function compileOpenPptSource(source) {
   return result.outputText;
 }
 
-async function evaluateOpenPptDeck({ source, slideDir }) {
+export async function evaluateOpenPptDeck({ source, slideDir, renderTimeoutMs = 0 }) {
   const React = require('react');
   const ReactDOMServer = require('react-dom/server');
   const code = await compileOpenPptSource(source);
@@ -131,8 +132,12 @@ async function evaluateOpenPptDeck({ source, slideDir }) {
     }
     throw new Error(`Unsupported slide import in export: ${specifier}`);
   };
-  const run = new Function('React', 'module', 'exports', 'require', code);
-  run(React, module, module.exports, localRequire);
+  if (renderTimeoutMs > 0) {
+    runInNewContext(code, { React, module, exports: module.exports, require: localRequire }, { timeout: renderTimeoutMs });
+  } else {
+    const run = new Function('React', 'module', 'exports', 'require', code);
+    run(React, module, module.exports, localRequire);
+  }
   const exports = module.exports;
   const pages = Array.isArray(exports.default ?? exports.pages)
     ? (exports.default ?? exports.pages).filter((item) => typeof item === 'function')
@@ -140,7 +145,7 @@ async function evaluateOpenPptDeck({ source, slideDir }) {
   if (pages.length === 0) throw new Error('slide module did not export Page[]');
   const design = exports.design && typeof exports.design === 'object' ? exports.design : {};
   const title = exports.meta?.title || 'SFA deck';
-  const htmlPages = pages.map((Page, index) => {
+  const renderPages = () => pages.map((Page, index) => {
     const markup = restoreRawStyleTagCss(
       ReactDOMServer.renderToStaticMarkup(React.createElement(Page, { design })),
     );
@@ -150,6 +155,9 @@ async function evaluateOpenPptDeck({ source, slideDir }) {
   </div>
 </section>`;
   });
+  const htmlPages = renderTimeoutMs > 0
+    ? runInNewContext('renderPages()', { renderPages }, { timeout: renderTimeoutMs })
+    : renderPages();
   return { design, title, pageCount: pages.length, htmlPages };
 }
 

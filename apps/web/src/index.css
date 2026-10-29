@@ -1,5 +1,26 @@
 @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700&display=swap');
 
+.deck-history { position: relative; }
+.deck-history-popover { position: absolute; inset-inline-end: 0; top: calc(100% + 10px); z-index: 80; width: min(380px, calc(100vw - 36px)); max-height: min(540px, 70vh); overflow: auto; padding: 18px; border: 1px solid var(--border-strong); border-radius: var(--radius); background: var(--bg-panel); color: var(--text); box-shadow: var(--shadow-md); font-size: 13px; }
+.deck-history-head { display: flex; justify-content: space-between; align-items: center; }
+.deck-history-head > button { border: 0; background: transparent; color: var(--text-muted); font-size: 22px; cursor: pointer; }
+.deck-history-popover p { color: var(--text-muted); line-height: 1.6; margin: 10px 0; }
+.deck-history-list { list-style: none; padding: 0; margin: 12px 0 0; }
+.deck-history-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.deck-history-list small { display: block; color: var(--text-muted); margin-top: 4px; }
+.deck-history-list button, .deck-history-save { border: 1px solid var(--border-strong); background: var(--bg-subtle); color: var(--text); border-radius: var(--radius-sm); padding: 6px 10px; white-space: nowrap; cursor: pointer; }
+.deck-history button:disabled { opacity: .5; cursor: default; }
+.deck-history button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.deck-history-popover .deck-history-pending { color: var(--amber); }
+.deck-history-error, .deck-history-popover .deck-history-error { color: var(--red); white-space: pre-wrap; overflow-wrap: anywhere; }
+.deck-delivery-report { border: 1px solid var(--border-strong); border-inline-start: 3px solid var(--text-muted); border-radius: var(--radius-sm); padding: 12px 14px; margin: 14px 0; font-size: 13px; }
+.deck-delivery-report.passed { border-inline-start-color: var(--green); }
+.deck-delivery-report.failed { border-inline-start-color: var(--red); }
+.deck-delivery-report > p { color: var(--text-muted); margin: 6px 0; }
+.deck-delivery-report details { margin-top: 10px; }
+.deck-delivery-report summary { cursor: pointer; }
+.deck-delivery-report li { margin-top: 5px; overflow-wrap: anywhere; }
+
 /* ============================================================
    Open Design — visual language modeled on claude.ai/design
    ============================================================ */

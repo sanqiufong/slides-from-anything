@@ -31,6 +31,32 @@ describe('parseSseFrame', () => {
 });
 
 describe('streamViaDaemon', () => {
+  it('reconnects a broken reader, skips replayed IDs and preserves delivery failures after partial text', async () => {
+    const handlers = createDaemonHandlers();
+    const onDelivery = vi.fn();
+    const onRunError = vi.fn();
+    const encoder = new TextEncoder();
+    let pull = 0;
+    const broken = new Response(new ReadableStream({ pull(controller) {
+      if (pull++ === 0) controller.enqueue(encoder.encode('id: 1\nevent: stdout\ndata: {"chunk":"first"}\n\n'));
+      else controller.error(new Error('network lost'));
+    } }));
+    const report = { status: 'failed', checkedAt: 1, checks: [], warnings: [], visualReview: 'pending' };
+    const fetcher = vi.fn().mockResolvedValueOnce(broken).mockResolvedValueOnce(sseResponse(
+      'id: 1\nevent: stdout\ndata: {"chunk":"first"}\n\n' +
+      'id: 2\nevent: stdout\ndata: {"chunk":"second"}\n\n' +
+      `id: 3\nevent: delivery\ndata: ${JSON.stringify(report)}\n\n` +
+      'id: 4\nevent: error\ndata: {"error":{"code":"DECK_DELIVERY_INVALID","message":"invalid deck"}}\n\n' +
+      'id: 5\nevent: end\ndata: {"code":0,"status":"failed"}\n\n'));
+    vi.stubGlobal('fetch', fetcher);
+    await reattachDaemonRun({ runId: 'run', signal: new AbortController().signal, handlers, onDelivery, onRunError });
+    expect(fetcher.mock.calls[1]?.[0]).toContain('after=1');
+    expect(handlers.onDelta.mock.calls.map(call => call[0]).join('')).toBe('firstsecond');
+    expect(onDelivery).toHaveBeenCalledWith(report);
+    expect(onRunError).toHaveBeenCalledWith({ code: 'DECK_DELIVERY_INVALID', message: 'invalid deck' });
+    expect(handlers.onError).toHaveBeenCalledWith(new Error('invalid deck'));
+    expect(handlers.onDone).not.toHaveBeenCalled();
+  });
   it('ignores comment frames without notifying handlers', async () => {
     const handlers = createDaemonHandlers();
     vi.stubGlobal('fetch', vi.fn()

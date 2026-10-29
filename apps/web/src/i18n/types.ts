@@ -25,7 +25,7 @@ export const LOCALE_LABEL: Record<Locale, string> = {
 // Translation dictionary shape — flat keys, dot-namespaced. We keep it
 // flat (not deeply nested) so missing-key TS errors point straight at the
 // offending string instead of a generic object mismatch.
-export interface Dict {
+export interface Dict extends Record<keyof typeof import('./adaptation-copy').adaptationCopy.en, string> {
   // Common
   'common.cancel': string;
   'common.save': string;

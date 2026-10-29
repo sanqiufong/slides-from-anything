@@ -1,7 +1,9 @@
+import { adaptationCopy } from '../adaptation-copy';
 import type { Dict } from '../types';
 import { en } from './en';
 
 export const ptBR: Dict = {
+  ...adaptationCopy['pt-BR'],
   ...en,
   'common.cancel': 'Cancelar',
   'common.save': 'Salvar',

@@ -1,7 +1,9 @@
+import { adaptationCopy } from '../adaptation-copy';
 import type { Dict } from '../types';
 import { en } from './en';
 
 export const ja: Dict = {
+  ...adaptationCopy['ja'],
   ...en,
   'common.cancel': 'キャンセル',
   'common.save': '保存',

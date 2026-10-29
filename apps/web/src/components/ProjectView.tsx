@@ -1160,6 +1160,8 @@ export function ProjectView({
           signal: controller.signal,
           cancelSignal: cancelController.signal,
           initialLastEventId: message.lastRunEventId ?? null,
+          onDelivery: delivery => updateMessageById(message.id, prev => ({ ...prev, delivery }), true),
+          onRunError: runError => updateMessageById(message.id, prev => ({ ...prev, runError }), true),
           handlers: {
             onDelta: (delta) => {
               textBuffer.appendContent(delta);
@@ -1630,6 +1632,8 @@ export function ProjectView({
               conversationId,
             );
           },
+          onDelivery: delivery => updateMessageById(assistantId, prev => ({ ...prev, delivery }), true, conversationId),
+          onRunError: runError => updateMessageById(assistantId, prev => ({ ...prev, runError }), true, conversationId),
           onRunStatus: (runStatus) => {
             updateMessageById(
               assistantId,

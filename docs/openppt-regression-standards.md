@@ -93,6 +93,16 @@ This document turns the OpenPPT implementation mistakes found during product ite
 - For export changes, generate at least one export artifact and compare it against the visible preview.
 - For localization changes, switch settings language and verify the new Open Slide UI strings follow it.
 
+## OpenDesign adaptation acceptance (2026-10-28)
+
+Comparison baseline: upstream stable `0.26.1` and main commit [`046d5e496b5e2824388e2a81482436a234326377`](https://github.com/nexu-io/open-design/commit/046d5e496b5e2824388e2a81482436a234326377). This is a scoped adaptation to the fork's TSX workbench, not a full upstream merge.
+
+- A run that changes the canonical TSX deck receives source, static rendering, local asset and opted-in motion checks. A zero CLI exit code cannot override a failed delivery check. A planning-only run reports that no deck files changed. These checks do not certify browser interaction, external URLs, narrative quality or visual acceptance.
+- Version history persists the authored slide directory, including local images/fonts, outside project exports. Restore verifies content hashes and source rendering before replacing files, saves the current contents first, rejects a stale digest, and is blocked during generation or pending editor changes. External/linked-directory assets and hidden runtime/editor files are outside the snapshot; current hidden state is retained on restore. Snapshots are limited to 512 MiB and 5000 files per deck and reject symlinks. Versions are retained until the project is deleted; no automatic pruning is performed.
+- The daemon owns persisted run status and event replay. Browser reload only detaches its subscription; explicit cancellation stops a run. Restart marks unfinished runs failed with `DAEMON_RESTARTED`, preserves existing output and requires an explicit retry. Reusing a `clientRequestId` reattaches to the same run. Both JSON and negotiated NDJSON message reads remain supported.
+- Qoder retains the `qodercli` configuration ID and `qoder` executable fallback. Its JSONL parser handles split UTF-8, optional partial messages, final wrappers, tool activity, usage and errors. Fixture tests, an authenticated provider invocation and human evaluation are separate evidence levels.
+- This adaptation does not replace the TSX deck format or PPTX export engine, add cloud sharing, redesign the editor/Vault, or authorize production publication.
+
 ## Stop Conditions
 
 - Do not continue building on a deck with module diagnostics unless the current task is to repair those diagnostics.

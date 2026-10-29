@@ -245,8 +245,26 @@ export async function listMessages(
   try {
     const resp = await fetch(
       `/api/projects/${encodeURIComponent(projectId)}/conversations/${encodeURIComponent(conversationId)}/messages`,
+      { headers: { Accept: 'application/x-ndjson, application/json;q=0.9' } },
     );
     if (!resp.ok) return [];
+    if (resp.headers.get('content-type')?.includes('application/x-ndjson') && resp.body) {
+      const messages: ChatMessage[] = [];
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let pending = '';
+      const append = (line: string) => { if (line.trim()) messages.push(JSON.parse(line) as ChatMessage); };
+      try {
+        while (true) {
+          const { value, done } = await reader.read();
+          pending += done ? decoder.decode() : decoder.decode(value, { stream: true });
+          let end: number;
+          while ((end = pending.indexOf('\n')) !== -1) { append(pending.slice(0, end)); pending = pending.slice(end + 1); }
+          if (done) { append(pending); break; }
+        }
+      } finally { reader.releaseLock(); }
+      return messages;
+    }
     const json = (await resp.json()) as { messages: ChatMessage[] };
     return json.messages ?? [];
   } catch {

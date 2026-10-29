@@ -1,7 +1,9 @@
+import { adaptationCopy } from '../adaptation-copy';
 import type { Dict } from '../types';
 import { en } from './en';
 
 export const zhTW: Dict = {
+  ...adaptationCopy['zh-TW'],
   ...en,
   'common.cancel': '取消',
   'common.save': '儲存',

@@ -30,6 +30,7 @@ import { listDesignSystems, readDesignSystem } from './design-systems.js';
 import { attachAcpSession } from './acp.js';
 import { attachPiRpcSession } from './pi-rpc.js';
 import { createClaudeStreamHandler } from './claude-stream.js';
+import { createQoderStreamHandler } from './qoder-stream.js';
 import { loadCritiqueConfigFromEnv } from './critique/config.js';
 import { reconcileStaleRuns } from './critique/persistence.js';
 import { runOrchestrator } from './critique/orchestrator.js';
@@ -39,6 +40,9 @@ import { subscribe as subscribeFileEvents } from './project-watchers.js';
 import { renderDesignSystemPreview } from './design-system-preview.js';
 import { renderDesignSystemShowcase } from './design-system-showcase.js';
 import { createChatRunService } from './runs.js';
+import { RunStore } from './run-store.js';
+import { DeckVersionStore } from './deck-versions.js';
+import { checkDeckAssets, checkDeckDelivery, validateDeckSource } from './deck-delivery.js';
 import { importClaudeDesignZip } from './claude-design-import.js';
 import { listPromptTemplates, readPromptTemplate } from './prompt-templates.js';
 import { buildDocumentPreview } from './document-preview.js';
@@ -3203,6 +3207,44 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     next();
   });
   const db = openDatabase(PROJECT_ROOT, { dataDir: RUNTIME_DATA_DIR });
+  const runStore = new RunStore(db);
+  runStore.recoverInterrupted();
+  const deckVersions = new DeckVersionStore(PROJECTS_DIR, path.join(RUNTIME_DATA_DIR, 'deck-versions'));
+  const deckEdits = new Set();
+  const design = { runs: createChatRunService({
+    createSseResponse, createSseErrorPayload, store: runStore,
+    idleTimeoutMs: CHAT_RUN_IDLE_TIMEOUT_MS, cancelGraceMs: CHAT_RUN_CANCEL_GRACE_MS,
+  }) };
+  const deckBusy = (projectId) => deckEdits.has(projectId)
+    || design.runs.list({ projectId }).some(run => !design.runs.isTerminal(run.status)
+      || (run.child && run.child.exitCode === null && run.child.signalCode === null));
+  const mutateDeck = async (projectId, slideId, edit) => {
+    if (deckBusy(projectId)) throw new Error('DECK_BUSY: Wait for the active deck task to finish.');
+    deckEdits.add(projectId);
+    try { return await deckVersions.write(projectId, slideId, edit); }
+    finally { deckEdits.delete(projectId); }
+  };
+  const mutateProjectFile = async (projectId, relativePath, edit) => {
+    const match = typeof relativePath === 'string' && /^slides\/([a-z0-9][a-z0-9_-]{0,80})(?:\/|$)/i.exec(relativePath);
+    if (!match || getProject(db, projectId)?.metadata?.kind !== 'deck') return edit();
+    if (fs.existsSync(path.join(PROJECTS_DIR, projectId, 'slides', match[1]))) {
+      let result;
+      await mutateDeck(projectId, match[1], async () => { result = await edit(); });
+      return result;
+    }
+    if (deckBusy(projectId)) throw new Error('DECK_BUSY: Wait for the active deck task to finish.');
+    deckEdits.add(projectId);
+    try {
+      const result = await edit();
+      await deckVersions.capture(projectId, match[1], { reason: 'after-edit' });
+      return result;
+    } finally { deckEdits.delete(projectId); }
+  };
+  const sendDeckError = (res, error) => {
+    const message = String(error?.message || error);
+    const code = message.includes('DECK_BUSY') ? 'DECK_BUSY' : message.includes('DECK_VERSION_CONFLICT') ? 'DECK_VERSION_CONFLICT' : 'BAD_REQUEST';
+    return sendApiError(res, code === 'BAD_REQUEST' ? 400 : 409, code, message);
+  };
   configureConnectorCredentialStore(new FileConnectorCredentialStore(RUNTIME_DATA_DIR));
   configureComposioConfigStore(RUNTIME_DATA_DIR);
   let daemonUrl = `http://127.0.0.1:${port}`;
@@ -3909,8 +3951,12 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.delete('/api/projects/:id', async (req, res) => {
     try {
+      projectDir(PROJECTS_DIR, req.params.id); // Validate before deleting any runtime/version directory.
+      for (const run of design.runs.list({ projectId: req.params.id, status: 'active' })) design.runs.cancel(run);
       dbDeleteProject(db, req.params.id);
+      runStore.deleteProject(req.params.id);
       await removeProjectDir(PROJECTS_DIR, req.params.id).catch(() => {});
+      await fs.promises.rm(path.join(RUNTIME_DATA_DIR, 'deck-versions', req.params.id), { recursive: true, force: true });
       /** @type {import('@open-design/contracts').OkResponse} */
       const body = { ok: true };
       res.json(body);
@@ -4059,7 +4105,13 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     if (!conv || conv.projectId !== req.params.id) {
       return res.status(404).json({ error: 'conversation not found' });
     }
-    res.json({ messages: listMessages(db, req.params.cid) });
+    const messages = listMessages(db, req.params.cid).map(message => runStore.hydrate(message, req.params.id, req.params.cid));
+    if (req.get('Accept')?.includes('application/x-ndjson')) {
+      res.type('application/x-ndjson');
+      for (const message of messages) res.write(`${JSON.stringify(message)}\n`);
+      return res.end();
+    }
+    res.json({ messages });
   });
 
   app.put('/api/projects/:id/conversations/:cid/messages/:mid', (req, res) => {
@@ -4071,13 +4123,13 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     if (m.id && m.id !== req.params.mid) {
       return res.status(400).json({ error: 'id mismatch' });
     }
-    const saved = upsertMessage(db, req.params.cid, {
+    const saved = upsertMessage(db, req.params.cid, runStore.hydrate({
       ...m,
       id: req.params.mid,
-    });
+    }, req.params.id, req.params.cid));
     // Bump the parent project's updatedAt so the project list re-orders.
     updateProject(db, req.params.id, {});
-    res.json({ message: saved });
+    res.json({ message: runStore.hydrate(saved, req.params.id, req.params.cid) });
   });
 
   // ---- Preview comments ----------------------------------------------------
@@ -4233,6 +4285,46 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   // ---- OpenPPT slide adapter ------------------------------------------------
 
+  app.get('/api/projects/:id/open-slide/versions', async (req, res) => {
+    try {
+      const slide = await resolveOpenPptSlideRequest(req, res);
+      if (slide) res.json(await deckVersions.list(req.params.id, slide.slideId));
+    } catch (err) { sendDeckError(res, err); }
+  });
+
+  app.post('/api/projects/:id/open-slide/versions', async (req, res) => {
+    let locked = false;
+    try {
+      if (deckBusy(req.params.id)) return sendApiError(res, 409, 'DECK_BUSY', 'DECK_BUSY: Wait for the active deck task to finish.');
+      deckEdits.add(req.params.id);
+      locked = true;
+      const slide = await resolveOpenPptSlideRequest(req, res, req.body?.slideId);
+      if (slide) res.json({ version: await deckVersions.capture(req.params.id, slide.slideId, { reason: 'manual' }) });
+    } catch (err) { sendDeckError(res, err); }
+    finally { if (locked) deckEdits.delete(req.params.id); }
+  });
+
+  app.post('/api/projects/:id/open-slide/versions/restore', async (req, res) => {
+    let locked = false;
+    try {
+      if (deckBusy(req.params.id)) return sendApiError(res, 409, 'DECK_BUSY', 'DECK_BUSY: Wait for the active deck task to finish.');
+      deckEdits.add(req.params.id);
+      locked = true;
+      const slide = await resolveOpenPptSlideRequest(req, res, req.body?.slideId);
+      if (!slide) return;
+      const version = await deckVersions.restore(req.params.id, slide.slideId, req.body?.versionId, req.body?.expectedDigest,
+        async (source, directory) => {
+          const rendered = await validateDeckSource(source, directory);
+          const assets = await checkDeckAssets(directory, source, rendered.htmlPages);
+          if (assets.issues.length) throw new Error(assets.issues.join('\n'));
+        });
+      updateProject(db, req.params.id, {});
+      res.json({ ok: true, version });
+    } catch (err) {
+      sendDeckError(res, err);
+    } finally { if (locked) deckEdits.delete(req.params.id); }
+  });
+
   app.get('/api/projects/:id/open-slide/source', async (req, res) => {
     try {
       const slide = await resolveOpenPptSlideRequest(req, res);
@@ -4245,7 +4337,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         comments: parseSlideComments(source),
       });
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4263,7 +4355,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         comments: parseSlideComments(source),
       });
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4297,7 +4389,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       );
       res.send(artifacts.zip);
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4338,7 +4430,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       );
       res.send(artifacts.pptx);
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4347,12 +4439,14 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       const slide = await resolveOpenPptSlideRequest(req, res, req.body?.slideId);
       if (!slide) return;
       const body = req.body || {};
-      const current = await fs.promises.readFile(slide.file, 'utf8');
-      const source =
-        typeof body.content === 'string'
-          ? body.content
-          : applyLineEdits(current, body.edits);
-      await fs.promises.writeFile(slide.file, source, 'utf8');
+      let source;
+      await mutateDeck(req.params.id, slide.slideId, async () => {
+        const current = await fs.promises.readFile(slide.file, 'utf8');
+        source = typeof body.content === 'string' ? body.content : applyLineEdits(current, body.edits);
+        const compiled = await compileOpenPptSlideModule(source);
+        if (compiled.diagnostics?.some(diagnostic => diagnostic.category === 1)) throw new Error('Invalid deck source.');
+        await fs.promises.writeFile(slide.file, source, 'utf8');
+      });
       updateProject(db, req.params.id, {});
       res.json({
         ok: true,
@@ -4361,7 +4455,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         comments: parseSlideComments(source),
       });
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4370,12 +4464,13 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       const slide = await resolveOpenPptSlideRequest(req, res, req.body?.slideId);
       if (!slide) return;
       const body = req.body || {};
-      const source = await fs.promises.readFile(slide.file, 'utf8');
-      const applied = await applyOpenPptEditBatch(source, body.edits);
-      if (applied.changed) {
-        await fs.promises.writeFile(slide.file, applied.source, 'utf8');
-        updateProject(db, req.params.id, {});
-      }
+      let applied;
+      await mutateDeck(req.params.id, slide.slideId, async () => {
+        const source = await fs.promises.readFile(slide.file, 'utf8');
+        applied = await applyOpenPptEditBatch(source, body.edits);
+        if (applied.changed) await fs.promises.writeFile(slide.file, applied.source, 'utf8');
+      });
+      if (applied.changed) updateProject(db, req.params.id, {});
       res.json({
         ok: true,
         changed: applied.changed,
@@ -4385,7 +4480,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         comments: parseSlideComments(applied.source),
       });
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4402,7 +4497,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         warning: parsed.warning,
       });
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4415,10 +4510,13 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
         return sendApiError(res, 400, 'BAD_REQUEST', 'design patch required');
       }
-      const source = await fs.promises.readFile(slide.file, 'utf8');
-      const parsed = parseOpenPptDesign(source);
-      const design = mergeOpenPptDesign(parsed.design, patch);
-      await fs.promises.writeFile(slide.file, writeOpenPptDesign(source, design), 'utf8');
+      let parsed, design;
+      await mutateDeck(req.params.id, slide.slideId, async () => {
+        const source = await fs.promises.readFile(slide.file, 'utf8');
+        parsed = parseOpenPptDesign(source);
+        design = mergeOpenPptDesign(parsed.design, patch);
+        await fs.promises.writeFile(slide.file, writeOpenPptDesign(source, design), 'utf8');
+      });
       updateProject(db, req.params.id, {});
       res.json({
         ok: true,
@@ -4428,7 +4526,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         warning: parsed.warning,
       });
     } catch (err) {
-      sendApiError(res, 400, 'BAD_REQUEST', String(err?.message || err));
+      sendDeckError(res, err);
     }
   });
 
@@ -4470,10 +4568,12 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
         if (!file) {
           warnings.push('invalid slide id; template metadata was locked but the current deck was not re-themed');
         } else if (fs.existsSync(file)) {
-          const source = await fs.promises.readFile(file, 'utf8');
-          const parsed = parseOpenPptDesign(source);
-          const nextDesign = openPptDesignFromVaultTemplate(vaultTemplate, parsed.design);
-          await fs.promises.writeFile(file, writeOpenPptDesign(source, nextDesign), 'utf8');
+          await mutateDeck(req.params.id, slideId, async () => {
+            const source = await fs.promises.readFile(file, 'utf8');
+            const parsed = parseOpenPptDesign(source);
+            const nextDesign = openPptDesignFromVaultTemplate(vaultTemplate, parsed.design);
+            await fs.promises.writeFile(file, writeOpenPptDesign(source, nextDesign), 'utf8');
+          });
           updateProject(db, req.params.id, {});
           applied = true;
         } else {
@@ -5616,7 +5716,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.delete('/api/projects/:id/raw/*', async (req, res) => {
     try {
-      await deleteProjectFile(PROJECTS_DIR, req.params.id, req.params[0]);
+      await mutateProjectFile(req.params.id, req.params[0], () => deleteProjectFile(PROJECTS_DIR, req.params.id, req.params[0]));
       /** @type {import('@open-design/contracts').DeleteProjectFileResponse} */
       const body = { ok: true };
       res.json(body);
@@ -5694,12 +5794,12 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
           const desiredName = sanitizeName(
             req.body?.name || req.file.originalname,
           );
-          const meta = await writeProjectFile(
+          const meta = await mutateProjectFile(req.params.id, desiredName, () => writeProjectFile(
             PROJECTS_DIR,
             req.params.id,
             desiredName,
             buf,
-          );
+          ));
           fs.promises.unlink(req.file.path).catch(() => {});
           /** @type {import('@open-design/contracts').ProjectFileResponse} */
           const body = { file: meta };
@@ -5732,7 +5832,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
           encoding === 'base64'
             ? Buffer.from(content, 'base64')
             : Buffer.from(content, 'utf8');
-        const meta = await writeProjectFile(
+        const meta = await mutateProjectFile(req.params.id, name, () => writeProjectFile(
           PROJECTS_DIR,
           req.params.id,
           name,
@@ -5740,7 +5840,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
           {
             artifactManifest,
           },
-        );
+        ));
         /** @type {import('@open-design/contracts').ProjectFileResponse} */
         const body = { file: meta };
         res.json(body);
@@ -5752,7 +5852,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
 
   app.delete('/api/projects/:id/files/:name', async (req, res) => {
     try {
-      await deleteProjectFile(PROJECTS_DIR, req.params.id, req.params.name);
+      await mutateProjectFile(req.params.id, req.params.name, () => deleteProjectFile(PROJECTS_DIR, req.params.id, req.params.name));
       /** @type {import('@open-design/contracts').DeleteProjectFileResponse} */
       const body = { ok: true };
       res.json(body);
@@ -6090,15 +6190,6 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     },
   );
 
-  const design = {
-    runs: createChatRunService({
-      createSseResponse,
-      createSseErrorPayload,
-      idleTimeoutMs: CHAT_RUN_IDLE_TIMEOUT_MS,
-      cancelGraceMs: CHAT_RUN_CANCEL_GRACE_MS,
-    }),
-  };
-
   const composeDaemonSystemPrompt = async ({
     projectId,
     skillId,
@@ -6187,6 +6278,36 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     // before spawning the agent. Returning that here avoids a second
     // `listSkills()` scan in `startChatRun`.
     return { prompt, activeSkillDir };
+  };
+
+  const finishChatRun = async (run, code, signal) => {
+    if (design.runs.isTerminal(run.status)) return;
+    const baseline = run.deckBaseline;
+    if (baseline) {
+      let changed = true;
+      let snapshotError = null;
+      try {
+        const version = await deckVersions.capture(run.projectId, baseline.slideId, { reason: 'after-run', runId: run.id });
+        changed = version.digest !== baseline.digest;
+      } catch (error) { snapshotError = String(error?.message || error); }
+      const metadata = getProject(db, run.projectId)?.metadata;
+      const delivery = await checkDeckDelivery({
+        slideId: baseline.slideId, slideDir: path.join(PROJECTS_DIR, run.projectId, 'slides', baseline.slideId),
+        changed, animations: metadata?.animations === true, mediaRequired: metadata?.deckMedia?.required === true,
+      });
+      if (snapshotError) {
+        delivery.status = 'failed';
+        delivery.warnings.push(`Could not preserve deck version: ${snapshotError}`);
+      }
+      if (design.runs.isTerminal(run.status)) return;
+      design.runs.emit(run, 'delivery', delivery);
+      if (delivery.status === 'failed' && code === 0) {
+        design.runs.emit(run, 'error', createSseErrorPayload('DECK_DELIVERY_INVALID',
+          'The agent exited successfully, but the changed deck failed technical delivery checks. Review the report and retry explicitly.'));
+      }
+    }
+    const status = run.cancelRequested ? 'canceled' : code === 0 && !run.errorCode ? 'succeeded' : 'failed';
+    design.runs.finish(run, status, code, signal);
   };
 
   const startChatRun = async (chatBody, run) => {
@@ -6306,6 +6427,11 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       typeof projectId === 'string' && projectId
         ? getProject(db, projectId)
         : null;
+    if (projectRecord?.metadata?.kind === 'deck' && cwd) {
+      const seeded = await ensureOpenPptSlideProject(PROJECTS_DIR, projectId, projectRecord);
+      const version = await deckVersions.capture(projectId, seeded.metadata.slideId, { reason: 'before-run', runId });
+      run.deckBaseline = { slideId: seeded.metadata.slideId, digest: version.digest };
+    }
     const linkedDirs = (() => {
       if (!Array.isArray(projectRecord?.metadata?.linkedDirs)) return [];
       const v = validateLinkedDirs(projectRecord.metadata.linkedDirs);
@@ -6720,7 +6846,7 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
           if (run.cancelRequested) {
             design.runs.finish(run, 'canceled', 1, null);
           } else if (succeeded) {
-            design.runs.finish(run, 'succeeded', 0, null);
+            await finishChatRun(run, 0, null);
           } else {
             design.runs.finish(run, 'failed', 1, null);
           }
@@ -6736,7 +6862,14 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
     // parser that turns stream_event objects into UI-friendly events. For
     // plain streams (most other CLIs) we forward raw chunks unchanged so
     // the browser can append them to the assistant's text buffer.
-    if (def.streamFormat === 'claude-stream-json') {
+    if (def.streamFormat === 'qoder-stream-json') {
+      const qoder = createQoderStreamHandler(event => {
+        if (event.type === 'error') send('error', createSseErrorPayload('AGENT_EXECUTION_FAILED', event.message));
+        else send('agent', event);
+      });
+      child.stdout.on('data', chunk => qoder.feed(chunk));
+      child.on('close', () => qoder.flush());
+    } else if (def.streamFormat === 'claude-stream-json') {
       const claude = createClaudeStreamHandler((ev) => send('agent', ev));
       child.stdout.on('data', (chunk) => claude.feed(chunk));
       child.on('close', () => claude.flush());
@@ -6785,21 +6918,54 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
       if (acpSession?.hasFatalError()) {
         return design.runs.finish(run, 'failed', code ?? 1, signal ?? null);
       }
-      const status = run.cancelRequested
-        ? 'canceled'
-        : code === 0
-          ? 'succeeded'
-          : 'failed';
-      design.runs.finish(run, status, code, signal);
+      void finishChatRun(run, code, signal).catch(error => design.runs.fail(run, 'DECK_DELIVERY_INVALID', String(error?.message || error)));
     });
   };
 
+  const acceptChatRun = (req, res) => {
+    const input = req.body || {};
+    for (const key of ['projectId', 'conversationId', 'assistantMessageId', 'clientRequestId']) {
+      if (input[key] != null && (typeof input[key] !== 'string' || input[key].length > 256)) {
+        sendApiError(res, 400, 'BAD_REQUEST', `invalid ${key}`); return null;
+      }
+    }
+    if (input.projectId && !getProject(db, input.projectId)) {
+      sendApiError(res, 404, 'PROJECT_NOT_FOUND', 'project not found'); return null;
+    }
+    if (input.conversationId && getConversation(db, input.conversationId)?.projectId !== input.projectId) {
+      sendApiError(res, 404, 'NOT_FOUND', 'conversation not found'); return null;
+    }
+    const existing = input.clientRequestId && design.runs.list({ projectId: input.projectId, conversationId: input.conversationId })
+      .find(candidate => candidate.clientRequestId === input.clientRequestId);
+    if (existing) return { run: design.runs.get(existing.id), fresh: false };
+    if (getProject(db, input.projectId)?.metadata?.kind === 'deck' && deckBusy(input.projectId)) {
+      sendApiError(res, 409, 'DECK_BUSY', 'DECK_BUSY: Wait for the active deck task to finish.'); return null;
+    }
+    if (input.conversationId && input.assistantMessageId) {
+      const message = db.prepare('SELECT conversation_id, role FROM messages WHERE id=?').get(input.assistantMessageId);
+      if (message && (message.conversation_id !== input.conversationId || message.role !== 'assistant')) {
+        sendApiError(res, 400, 'BAD_REQUEST', 'assistant message does not belong to this conversation'); return null;
+      }
+    }
+    const run = design.runs.create(input);
+    if (input.conversationId && input.assistantMessageId) {
+      const message = listMessages(db, input.conversationId).find(candidate => candidate.id === input.assistantMessageId);
+      upsertMessage(db, input.conversationId, {
+        ...(message ?? { id: input.assistantMessageId, role: 'assistant', content: '', agentId: input.agentId }),
+        runId: run.id, runStatus: 'queued', startedAt: run.createdAt,
+      });
+    }
+    return { run, fresh: true };
+  };
+
   app.post('/api/runs', (req, res) => {
-    const run = design.runs.create(req.body || {});
+    const accepted = acceptChatRun(req, res);
+    if (!accepted) return;
+    const { run, fresh } = accepted;
     /** @type {import('@open-design/contracts').ChatRunCreateResponse} */
     const body = { runId: run.id };
     res.status(202).json(body);
-    design.runs.start(run, () => startChatRun(req.body || {}, run));
+    if (fresh) design.runs.start(run, () => startChatRun(req.body || {}, run));
   });
 
   app.get('/api/runs', (req, res) => {
@@ -6832,9 +6998,11 @@ export async function startServer({ port = 7456, host = process.env.OD_BIND_HOST
   });
 
   app.post('/api/chat', (req, res) => {
-    const run = design.runs.create();
+    const accepted = acceptChatRun(req, res);
+    if (!accepted) return;
+    const { run, fresh } = accepted;
     design.runs.stream(run, req, res);
-    design.runs.start(run, () => startChatRun(req.body || {}, run));
+    if (fresh) design.runs.start(run, () => startChatRun(req.body || {}, run));
   });
 
   // ---- API Proxy (SSE) for API-compatible endpoints ------------------------

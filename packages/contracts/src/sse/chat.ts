@@ -1,5 +1,6 @@
 import type { SseErrorPayload } from '../errors';
 import type { SseTransportEvent } from './common';
+import type { DeckDeliveryReport } from '../api/openppt';
 
 export type LiveArtifactSseAction = 'created' | 'updated' | 'deleted';
 export type LiveArtifactRefreshSsePhase = 'started' | 'succeeded' | 'failed';
@@ -46,6 +47,7 @@ export interface ChatSseEndPayload {
   code: number | null;
   signal?: string | null;
   status?: 'succeeded' | 'failed' | 'canceled';
+  delivery?: DeckDeliveryReport;
 }
 
 export type DaemonAgentPayload =
@@ -66,4 +68,5 @@ export type ChatSseEvent =
   | SseTransportEvent<'stdout', ChatSseChunkPayload>
   | SseTransportEvent<'stderr', ChatSseChunkPayload>
   | SseTransportEvent<'error', SseErrorPayload>
+  | SseTransportEvent<'delivery', DeckDeliveryReport>
   | SseTransportEvent<'end', ChatSseEndPayload>;

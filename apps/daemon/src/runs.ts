@@ -1,6 +1,15 @@
 // @ts-nocheck
 import { randomUUID } from 'node:crypto';
 import { spawn as spawnChildProcess } from 'node:child_process';
+import type { RunStore } from './run-store.js';
+
+interface ChatRunServiceOptions {
+  createSseResponse: (response: any) => any;
+  createSseErrorPayload: (code: string, message: string, init?: any) => any;
+  maxEvents?: number; ttlMs?: number; idleTimeoutMs?: number; cancelGraceMs?: number;
+  terminateChild?: (child: any, signal: string) => boolean;
+  store?: RunStore | null;
+}
 
 export const TERMINAL_RUN_STATUSES = new Set(['succeeded', 'failed', 'canceled']);
 const DEFAULT_IDLE_TIMEOUT_MS = 10 * 60 * 1000;
@@ -14,7 +23,8 @@ export function createChatRunService({
   idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS,
   cancelGraceMs = DEFAULT_CANCEL_GRACE_MS,
   terminateChild = terminateChildProcess,
-}) {
+  store = null,
+}: ChatRunServiceOptions) {
   const runs = new Map();
   const normalizedIdleTimeoutMs = normalizePositiveMs(idleTimeoutMs);
   const normalizedCancelGraceMs = normalizePositiveMs(cancelGraceMs);
@@ -44,10 +54,23 @@ export function createChatRunService({
       forceKillTimer: null,
     };
     runs.set(run.id, run);
+    store?.save(run);
     return run;
   };
 
-  const get = (id) => runs.get(id) ?? null;
+  const get = (id) => {
+    const active = runs.get(id);
+    if (active) return active;
+    const record = store?.get(id);
+    if (!record) return null;
+    const events = store.events(id);
+    const restored = { ...record, events: events.slice(-maxEvents), nextEventId: (events.at(-1)?.id ?? 0) + 1,
+      clients: new Set(), waiters: new Set(), child: null, acpSession: null,
+      idleTimer: null, forceKillTimer: null, cancelRequested: record.status === 'canceled' };
+    runs.set(id, restored);
+    if (TERMINAL_RUN_STATUSES.has(record.status)) scheduleCleanup(restored);
+    return restored;
+  };
 
   const scheduleCleanup = (run) => {
     setTimeout(() => {
@@ -108,6 +131,12 @@ export function createChatRunService({
     run.events.push(record);
     if (run.events.length > maxEvents) run.events.splice(0, run.events.length - maxEvents);
     run.updatedAt = Date.now();
+    if (event === 'error') {
+      run.errorCode = data?.error?.code ?? 'AGENT_EXECUTION_FAILED';
+      run.errorMessage = data?.error?.message ?? data?.message ?? run.errorCode;
+    }
+    if (event === 'delivery') run.delivery = data;
+    store?.append(run, record);
     scheduleIdleTimeout(run);
     for (const sse of run.clients) sse.send(event, data, id);
     return record;
@@ -124,16 +153,20 @@ export function createChatRunService({
     updatedAt: run.updatedAt,
     exitCode: run.exitCode,
     signal: run.signal,
+    errorCode: run.errorCode ?? null,
+    errorMessage: run.errorMessage ?? null,
+    delivery: run.delivery,
   });
 
-  const finish = (run, status, code = null, signal = null) => {
+  const finish = (run, status, code: number | null = null, signal: string | null = null) => {
     if (TERMINAL_RUN_STATUSES.has(run.status)) return;
     clearIdleTimer(run);
     run.status = status;
     run.exitCode = code;
     run.signal = signal;
     run.updatedAt = Date.now();
-    emit(run, 'end', { code, signal, status });
+    emit(run, 'end', { code, signal, status, delivery: run.delivery });
+    store?.reconcileMessages(run.id);
     for (const sse of run.clients) sse.end();
     run.clients.clear();
     for (const waiter of run.waiters) waiter(statusBody(run));
@@ -158,7 +191,7 @@ export function createChatRunService({
   const stream = (run, req, res) => {
     const sse = createSseResponse(res);
     const lastEventId = Number(req.get('Last-Event-ID') || req.query.after || 0);
-    for (const record of run.events) {
+    for (const record of store ? store.events(run.id, Number.isFinite(lastEventId) ? lastEventId : 0) : run.events) {
       if (!Number.isFinite(lastEventId) || record.id > lastEventId) {
         sse.send(record.event, record.data, record.id);
       }
@@ -174,13 +207,17 @@ export function createChatRunService({
     });
   };
 
-  const list = ({ projectId, conversationId, status } = {}) => Array.from(runs.values()).filter((run) => {
+  const list = ({ projectId, conversationId, status } = {}) => {
+    const all = new Map((store?.all() ?? []).map(run => [run.id, run]));
+    for (const run of runs.values()) all.set(run.id, run);
+    return Array.from(all.values()).filter((run) => {
     if (typeof projectId === 'string' && projectId && run.projectId !== projectId) return false;
     if (typeof conversationId === 'string' && conversationId && run.conversationId !== conversationId) return false;
     if (status === 'active') return !TERMINAL_RUN_STATUSES.has(run.status);
     if (typeof status === 'string' && status) return run.status === status;
     return true;
-  });
+    });
+  };
 
   const cancel = (run) => {
     if (!TERMINAL_RUN_STATUSES.has(run.status)) {

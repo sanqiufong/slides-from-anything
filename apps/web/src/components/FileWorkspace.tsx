@@ -29,6 +29,7 @@ import {
   type SlideFeedback,
 } from '../types';
 import { DesignFilesPanel } from './DesignFilesPanel';
+import { DeckHistory } from './DeckHistory';
 import { FileViewer, LiveArtifactViewer } from './FileViewer';
 import { Icon } from './Icon';
 import { LiveArtifactBadges } from './LiveArtifactBadges';
@@ -3470,6 +3471,17 @@ function OpenSlideWorkbenchPane({
                   <Icon name="pencil" size={14} />
                   <span>{t('openSlide.inspect')}</span>
                 </button>
+                {slideId ? <DeckHistory projectId={projectId} slideId={slideId} revision={file.mtime}
+                  disabled={agentBusy || saving || unsavedCount > 0} onRestored={async () => {
+                    setPendingInspectEdits([]);
+                    pendingInspectEditsRef.current = [];
+                    undoInspectStackRef.current = [];
+                    clearRedoStack();
+                    setSelectedTarget(null);
+                    await refreshSlideModule();
+                    setPreviewRevision(value => value + 1);
+                    await onRefreshFiles?.();
+                  }} /> : null}
                 <div className="share-menu open-slide-export-menu" ref={exportMenuRef}>
                   <button
                     type="button"

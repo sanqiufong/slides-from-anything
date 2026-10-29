@@ -12,6 +12,18 @@
     "./critique": {
       "types": "./src/critique.ts",
       "default": "./src/critique.ts"
+    },
+    "./api/chat": {
+      "types": "./src/api/chat.ts",
+      "default": "./src/api/chat.ts"
+    },
+    "./api/openppt": {
+      "types": "./src/api/openppt.ts",
+      "default": "./src/api/openppt.ts"
+    },
+    "./openppt-motion-audit": {
+      "types": "./src/openppt-motion-audit.ts",
+      "default": "./src/openppt-motion-audit.ts"
     }
   },
   "types": "./src/index.ts",
